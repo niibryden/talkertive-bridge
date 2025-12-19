@@ -407,19 +407,21 @@ async function handleCallEnd(callSid, startTime, context) {
 }
 
 // Start server
-server.listen(PORT, () => {
+const HOST = '0.0.0.0';
+
+server.listen(PORT, HOST, () => {
   console.log('🚀 Talkertive WebSocket Bridge Server Started');
-  console.log('━'.repeat(50));
+  console.log('='.repeat(50));
   console.log(`📡 Server running on port ${PORT}`);
-  console.log(`🔗 WebSocket endpoint: ws://localhost:${PORT}/media-stream`);
-  console.log(`📞 Twilio webhook: http://localhost:${PORT}/incoming-call`);
-  console.log(`❤️  Health check: http://localhost:${PORT}/health`);
-  console.log('━'.repeat(50));
+  console.log(`🔌 WebSocket endpoint: /media-stream`);
+  console.log(`📞 Twilio webhook: /incoming-call`);
+  console.log(`❤️ Health check: /health`);
+  console.log('='.repeat(50));
+
   console.log('✅ OpenAI:', process.env.OPENAI_API_KEY ? 'Configured' : '❌ Missing');
   console.log('✅ ElevenLabs:', process.env.ELEVENLABS_API_KEY ? 'Configured' : '❌ Missing');
   console.log('✅ Twilio:', process.env.TWILIO_ACCOUNT_SID ? 'Configured' : '❌ Missing');
   console.log('✅ Supabase:', process.env.SUPABASE_URL ? 'Configured' : '❌ Missing');
-  console.log('━'.repeat(50));
 });
 
 // Graceful shutdown
