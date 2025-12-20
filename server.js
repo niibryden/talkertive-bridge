@@ -1,3 +1,11 @@
+📋 COMPLETE SERVER.JS CODE - COPY THIS ⬇️
+Instructions:
+
+Open your local websocket-bridge/server.js file
+Delete EVERYTHING in it
+Copy the code below and paste it in
+Save the file
+Deploy to Railway
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
@@ -13,18 +21,31 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-// ============= SECURITY: Credential Sanitization =============
+// ============= ENHANCED SECURITY: Credential Sanitization =============
 function sanitizeForLog(obj) {
   if (typeof obj === 'string') {
-    // Mask API keys in strings
-    return obj.replace(/sk-[a-zA-Z0-9]{20,}/g, 'sk-***REDACTED***')
+    // Mask API keys, tokens, and bearer tokens in strings
+    return obj.replace(/sk-[a-zA-Z0-9_-]{20,}/g, 'sk-***REDACTED***')
+              .replace(/sk-proj-[a-zA-Z0-9_-]{20,}/g, 'sk-proj-***REDACTED***')
               .replace(/AC[a-z0-9]{32}/g, 'AC***REDACTED***')
-              .replace(/[a-f0-9]{32}/g, '***REDACTED***');
+              .replace(/[a-f0-9]{32}/g, '***REDACTED***')
+              .replace(/Bearer\s+[a-zA-Z0-9._-]+/gi, 'Bearer ***REDACTED***')
+              .replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, 'JWT***REDACTED***');
   }
   if (typeof obj === 'object' && obj !== null) {
+    // Handle Error objects specially
+    if (obj instanceof Error) {
+      return {
+        name: obj.name,
+        message: sanitizeForLog(obj.message),
+        stack: '***STACK_REDACTED***'
+      };
+    }
     const sanitized = {};
     for (const key in obj) {
-      if (['apiKey', 'api_key', 'token', 'password', 'secret', 'auth'].some(k => key.toLowerCase().includes(k))) {
+      const lowerKey = key.toLowerCase();
+      // Check if key contains sensitive terms
+      if (['apikey', 'api_key', 'token', 'password', 'secret', 'auth', 'bearer', 'key', 'sid', 'credential'].some(k => lowerKey.includes(k))) {
         sanitized[key] = '***REDACTED***';
       } else {
         sanitized[key] = sanitizeForLog(obj[key]);
@@ -34,6 +55,13 @@ function sanitizeForLog(obj) {
   }
   return obj;
 }
+
+// Test sanitization on startup
+console.log('🔒 SECURITY TEST - Sanitization Check:');
+console.log('Test 1:', sanitizeForLog('Key: sk-1234567890abcdefghij1234567890'));
+console.log('Test 2:', sanitizeForLog({ apiKey: 'sk-test', data: 'safe' }));
+console.log('Expected: All keys should show as ***REDACTED***');
+console.log('');
 
 // Environment variables validation (don't log actual values)
 const requiredEnvVars = [
@@ -46,11 +74,12 @@ const requiredEnvVars = [
   'PORT'
 ];
 
+console.log('🔧 Environment Variables Check:');
 requiredEnvVars.forEach(varName => {
-  if (!process.env[varName]) {
-    console.error(`❌ Missing required environment variable: ${varName}`);
-  }
+  const exists = !!process.env[varName];
+  console.log(`  ${exists ? '✅' : '❌'} ${varName}: ${exists ? 'Configured' : 'MISSING'}`);
 });
+console.log('');
 
 // Initialize clients
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -81,7 +110,10 @@ app.get('/health', (req, res) => {
 // ============= FETCH USER SETTINGS BY PHONE NUMBER =============
 async function getUserSettingsByPhone(phoneNumber) {
   try {
-    console.log(`🔍 Looking up user settings for phone: ${phoneNumber}`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('🔍 FETCHING USER SETTINGS');
+    console.log(`📞 Looking up phone: ${phoneNumber}`);
+    console.log(`🔗 Endpoint: ${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/settings/by-phone/${encodeURIComponent(phoneNumber)}`);
     
     const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/settings/by-phone/${encodeURIComponent(phoneNumber)}`, {
       headers: {
@@ -89,16 +121,27 @@ async function getUserSettingsByPhone(phoneNumber) {
       }
     });
     
+    console.log(`📡 Response status: ${response.status} ${response.statusText}`);
+    
     if (response.ok) {
       const data = await response.json();
-      console.log(`✅ Found settings for user`);
+      console.log('✅ SUCCESS - Settings found!');
+      console.log('📋 Business Name:', data.settings?.businessName || '(not set)');
+      console.log('📋 Business Hours:', data.settings?.businessHours || '(not set)');
+      console.log('📋 Has Custom Prompt:', data.settings?.aiPrompt ? 'Yes' : 'No');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       return data.settings || null;
     } else {
-      console.log(`⚠️ No settings found for phone ${phoneNumber}`);
+      const errorText = await response.text();
+      console.log('❌ FAILED - No settings found');
+      console.log('Error:', errorText);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       return null;
     }
   } catch (error) {
-    console.error('Error fetching user settings:', sanitizeForLog(error.message));
+    console.error('❌ ERROR fetching user settings');
+    console.error('Message:', sanitizeForLog(error.message));
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     return null;
   }
 }
@@ -108,6 +151,11 @@ function buildAIInstructions(userSettings) {
   const businessName = userSettings?.businessName || 'the business';
   const businessHours = userSettings?.businessHours || 'standard business hours';
   const customInstructions = userSettings?.aiPrompt || '';
+  
+  console.log('🤖 BUILDING AI INSTRUCTIONS:');
+  console.log(`   Business Name: "${businessName}"`);
+  console.log(`   Business Hours: "${businessHours}"`);
+  console.log(`   Custom Instructions: ${customInstructions ? 'Yes (' + customInstructions.substring(0, 50) + '...)' : 'None'}`);
   
   const baseInstructions = `You are an energetic, friendly AI receptionist for ${businessName}.
 
@@ -180,11 +228,15 @@ KEEP THE ENERGY UP! You're not just answering questions - you're representing ${
 
 // Twilio webhook endpoint - handles incoming calls
 app.post('/incoming-call', async (req, res) => {
-  console.log('📞 Incoming call received');
+  console.log('📞 INCOMING CALL');
   
   const callSid = req.body.CallSid;
   const from = req.body.From;
   const to = req.body.To;
+  
+  console.log(`   From: ${from}`);
+  console.log(`   To: ${to}`);
+  console.log(`   CallSid: ${callSid}`);
   
   // Log call start to Supabase
   try {
@@ -206,12 +258,12 @@ app.post('/incoming-call', async (req, res) => {
     });
     
     if (!response.ok) {
-      console.error('Failed to log call start');
+      console.error('❌ Failed to log call start');
     } else {
       console.log('✅ Call logged to database');
     }
   } catch (error) {
-    console.error('Error logging call start:', sanitizeForLog(error.message));
+    console.error('❌ Error logging call start:', sanitizeForLog(error));
   }
   
   // TwiML response - connect to WebSocket
@@ -232,7 +284,10 @@ app.post('/incoming-call', async (req, res) => {
 
 // WebSocket handler for Twilio Media Streams
 wss.on('connection', async (ws, req) => {
-  console.log('🔌 New WebSocket connection established');
+  console.log('');
+  console.log('═══════════════════════════════════════');
+  console.log('🔌 NEW WEBSOCKET CONNECTION');
+  console.log('═══════════════════════════════════════');
   
   const sessionId = uuidv4();
   let callSid = null;
@@ -269,7 +324,10 @@ wss.on('connection', async (ws, req) => {
           const customParams = msg.start.customParameters;
           toPhoneNumber = customParams?.to || msg.start.to;
           
-          console.log(`📞 Call started - CallSid: ${callSid}`);
+          console.log('📞 CALL STARTED');
+          console.log(`   CallSid: ${callSid}`);
+          console.log(`   StreamSid: ${streamSid}`);
+          console.log(`   To Phone: ${toPhoneNumber}`);
           
           // Update session
           const session = activeSessions.get(sessionId);
@@ -279,6 +337,12 @@ wss.on('connection', async (ws, req) => {
           
           // ============= FETCH USER SETTINGS =============
           userSettings = await getUserSettingsByPhone(toPhoneNumber);
+          
+          if (!userSettings) {
+            console.log('⚠️  WARNING: No settings found - using default');
+            console.log('⚠️  AI will greet with "the business" instead of your business name');
+            console.log('⚠️  To fix: Ensure phone number in Settings matches exactly: ' + toPhoneNumber);
+          }
           
           // Initialize OpenAI connection NOW with user-specific settings
           await initializeOpenAI(userSettings);
@@ -296,7 +360,7 @@ wss.on('connection', async (ws, req) => {
           break;
           
         case 'stop':
-          console.log('📞 Call ended');
+          console.log('📞 CALL ENDED');
           await handleCallEnd(callSid, callStartTime, conversationContext, toPhoneNumber);
           
           // Close OpenAI connection
@@ -306,13 +370,15 @@ wss.on('connection', async (ws, req) => {
           break;
       }
     } catch (error) {
-      console.error('Error processing Twilio message:', sanitizeForLog(error.message));
+      console.error('❌ Error processing Twilio message:', sanitizeForLog(error));
     }
   });
   
   // Initialize OpenAI with dynamic settings
   async function initializeOpenAI(settings) {
     try {
+      console.log('🔗 Connecting to OpenAI Realtime API...');
+      
       openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
         headers: {
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -325,6 +391,8 @@ wss.on('connection', async (ws, req) => {
         
         // Build dynamic instructions with user's business info
         const instructions = buildAIInstructions(settings);
+        
+        console.log('⚙️  Configuring OpenAI session...');
         
         // Send session configuration
         openaiWs.send(JSON.stringify({
@@ -361,10 +429,12 @@ wss.on('connection', async (ws, req) => {
               break;
               
             case 'session.updated':
-              console.log('✅ OpenAI session updated');
+              console.log('✅ OpenAI session configured');
               
               // Trigger the AI to greet the caller
               const businessName = settings?.businessName || 'the business';
+              console.log(`🎤 Triggering greeting with business name: "${businessName}"`);
+              
               openaiWs.send(JSON.stringify({
                 type: 'response.create',
                 response: {
@@ -410,12 +480,12 @@ wss.on('connection', async (ws, req) => {
               break;
           }
         } catch (error) {
-          console.error('Error processing OpenAI message:', sanitizeForLog(error.message));
+          console.error('❌ Error processing OpenAI message:', sanitizeForLog(error));
         }
       });
       
       openaiWs.on('error', (error) => {
-        console.error('❌ OpenAI WebSocket error:', sanitizeForLog(error.message));
+        console.error('❌ OpenAI WebSocket error:', sanitizeForLog(error));
       });
       
       openaiWs.on('close', () => {
@@ -429,12 +499,14 @@ wss.on('connection', async (ws, req) => {
       }
       
     } catch (error) {
-      console.error('❌ Failed to connect to OpenAI:', sanitizeForLog(error.message));
+      console.error('❌ Failed to connect to OpenAI:', sanitizeForLog(error));
     }
   }
   
   ws.on('close', () => {
     console.log('🔌 Twilio WebSocket closed');
+    console.log('═══════════════════════════════════════');
+    console.log('');
     activeSessions.delete(sessionId);
     
     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -443,7 +515,7 @@ wss.on('connection', async (ws, req) => {
   });
   
   ws.on('error', (error) => {
-    console.error('❌ Twilio WebSocket error:', sanitizeForLog(error.message));
+    console.error('❌ Twilio WebSocket error:', sanitizeForLog(error));
   });
 });
 
@@ -455,7 +527,7 @@ function extractLeadInfo(transcript, context) {
   const emailMatch = transcript.match(/[\w.-]+@[\w.-]+\.\w+/);
   if (emailMatch) {
     context.leadInfo.email = emailMatch[0];
-    console.log('📧 Email captured');
+    console.log('📧 Email captured:', emailMatch[0]);
   }
   
   // Name pattern
@@ -463,7 +535,7 @@ function extractLeadInfo(transcript, context) {
     const nameMatch = transcript.match(/(?:my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
     if (nameMatch) {
       context.leadInfo.name = nameMatch[1];
-      console.log('👤 Name captured');
+      console.log('👤 Name captured:', nameMatch[1]);
     }
   }
   
@@ -478,7 +550,10 @@ function extractLeadInfo(transcript, context) {
 async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
   const duration = Math.floor((Date.now() - startTime) / 1000);
   
-  console.log('📊 Call completed');
+  console.log('📊 CALL SUMMARY:');
+  console.log(`   Duration: ${duration}s`);
+  console.log(`   Lead Captured: ${!!context.leadInfo.name || !!context.leadInfo.email ? 'Yes' : 'No'}`);
+  console.log(`   Appointment Requested: ${context.appointmentRequested ? 'Yes' : 'No'}`);
   
   const callData = {
     callSid,
@@ -508,7 +583,7 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
     
     console.log('✅ Call log updated');
   } catch (error) {
-    console.error('Error updating call log:', sanitizeForLog(error.message));
+    console.error('❌ Error updating call log:', sanitizeForLog(error));
   }
   
   // Create lead if we have information
@@ -533,7 +608,7 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
       
       console.log('✅ Lead created');
     } catch (error) {
-      console.error('Error creating lead:', sanitizeForLog(error.message));
+      console.error('❌ Error creating lead:', sanitizeForLog(error));
     }
   }
   
@@ -569,25 +644,31 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
         console.error('❌ n8n webhook failed');
       }
     } catch (error) {
-      console.error('❌ Error triggering n8n webhook:', sanitizeForLog(error.message));
+      console.error('❌ Error triggering n8n webhook:', sanitizeForLog(error));
     }
   }
 }
 
 // Start server
 server.listen(PORT, () => {
-  console.log('🚀 Talkertive WebSocket Bridge Server Started');
-  console.log('━'.repeat(50));
+  console.log('');
+  console.log('╔══════════════════════════════════════════════════╗');
+  console.log('║   🚀 Talkertive WebSocket Bridge Server         ║');
+  console.log('╚══════════════════════════════════════════════════╝');
+  console.log('');
   console.log(`📡 Server running on port ${PORT}`);
-  console.log(`🔗 WebSocket endpoint: ws://localhost:${PORT}/media-stream`);
-  console.log(`📞 Twilio webhook: http://localhost:${PORT}/incoming-call`);
-  console.log(`❤️  Health check: http://localhost:${PORT}/health`);
-  console.log('━'.repeat(50));
-  console.log('✅ OpenAI:', process.env.OPENAI_API_KEY ? 'Configured' : '❌ Missing');
-  console.log('✅ ElevenLabs:', process.env.ELEVENLABS_API_KEY ? 'Configured' : '❌ Missing');
-  console.log('✅ Twilio:', process.env.TWILIO_ACCOUNT_SID ? 'Configured' : '❌ Missing');
-  console.log('✅ Supabase:', process.env.SUPABASE_URL ? 'Configured' : '❌ Missing');
-  console.log('━'.repeat(50));
+  console.log(`🔗 WebSocket: ws://localhost:${PORT}/media-stream`);
+  console.log(`📞 Webhook: http://localhost:${PORT}/incoming-call`);
+  console.log(`❤️  Health: http://localhost:${PORT}/health`);
+  console.log('');
+  console.log('Environment:');
+  console.log('  ✅ OpenAI:', process.env.OPENAI_API_KEY ? 'Configured' : '❌ Missing');
+  console.log('  ✅ ElevenLabs:', process.env.ELEVENLABS_API_KEY ? 'Configured' : '❌ Missing');
+  console.log('  ✅ Twilio:', process.env.TWILIO_ACCOUNT_SID ? 'Configured' : '❌ Missing');
+  console.log('  ✅ Supabase:', process.env.SUPABASE_URL ? 'Configured' : '❌ Missing');
+  console.log('');
+  console.log('Ready to receive calls! 📞');
+  console.log('');
 });
 
 // Graceful shutdown
