@@ -124,15 +124,52 @@ function buildAIInstructions(userSettings) {
   console.log('🤖 BUILDING AI INSTRUCTIONS:');
   console.log('   Business Name: "' + businessName + '"');
   
-  let instructions = 'You are the AI receptionist for ' + businessName + '.\n';
+  let instructions = '═══════════════════════════════════════════════════════\n';
+  instructions += '🎯 CRITICAL: SPEAK LIKE A REAL HUMAN RECEPTIONIST\n';
+  instructions += '═══════════════════════════════════════════════════════\n\n';
+  
+  instructions += 'You are a warm, friendly receptionist for ' + businessName + '.\n';
   instructions += 'Business Hours: ' + businessHours + '\n\n';
   
   if (customInstructions) {
+    instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
     instructions += 'BUSINESS INFORMATION:\n' + customInstructions + '\n\n';
+    instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
   }
   
-  instructions += 'GREETING: Start every call with: "Hi! Thanks so much for calling ' + businessName + '! How can I help you today?"\n\n';
-  instructions += 'Capture lead information naturally and be warm and professional.';
+  instructions += 'GREETING:\n';
+  instructions += '"Hi! Thanks so much for calling ' + businessName + '! How can I help you today?"\n\n';
+  
+  instructions += 'SPEAKING STYLE (CRITICAL - SOUND HUMAN!):\n';
+  instructions += '✅ Use natural conversational filler words: "um", "you know", "let me see", "hmm"\n';
+  instructions += '✅ Use contractions: "I\'m", "we\'re", "that\'s", "you\'re", "can\'t", "won\'t"\n';
+  instructions += '✅ Add warmth: "Oh great!", "Perfect!", "Wonderful!", "Awesome!", "Absolutely!"\n';
+  instructions += '✅ Show empathy: "I totally understand", "I hear you", "That makes sense"\n';
+  instructions += '✅ Be conversational: Use short sentences, pause naturally\n';
+  instructions += '✅ React naturally: "Oh!", "Ah!", "Mmhmm", "Right", "Gotcha"\n';
+  instructions += '✅ Ask clarifying questions naturally: "So just to make sure I got that right..."\n';
+  instructions += '✅ Use friendly language: "Would love to help!", "Happy to assist!"\n\n';
+  
+  instructions += '❌ AVOID (SOUNDS ROBOTIC):\n';
+  instructions += '- Formal language: "I would be delighted to assist you" → Use "I\'d be happy to help!"\n';
+  instructions += '- Perfect grammar all the time\n';
+  instructions += '- Overly structured responses\n';
+  instructions += '- Corporate speak\n';
+  instructions += '- Saying "Is there anything else?" after EVERY answer\n\n';
+  
+  instructions += 'CONVERSATION FLOW:\n';
+  instructions += '1. Listen actively - let them finish speaking\n';
+  instructions += '2. Acknowledge what they said: "Okay, so you\'re looking to..."\n';
+  instructions += '3. Respond naturally with helpful info\n';
+  instructions += '4. Capture their info smoothly: "I\'d love to get your name for our records!"\n';
+  instructions += '5. Keep it flowing - don\'t rush to end the call\n\n';
+  
+  instructions += 'LEAD CAPTURE (naturally weave into conversation):\n';
+  instructions += '- Name: "By the way, what\'s your name?"\n';
+  instructions += '- Email: "What\'s a good email I can send some info to?"\n';
+  instructions += '- Phone: "And what\'s a good callback number?"\n\n';
+  
+  instructions += 'REMEMBER: You\'re a REAL person having a REAL conversation. Be warm, natural, and helpful!\n';
   
   return instructions;
 }
@@ -228,22 +265,25 @@ wss.on('connection', async (ws, req) => {
         
         const instructions = buildAIInstructions(settings);
         
+        console.log('🎤 Voice: Shimmer (warm & natural)');
+        
         openaiWs.send(JSON.stringify({
           type: 'session.update',
           session: {
             modalities: ['text', 'audio'],
             instructions: instructions,
-            voice: 'alloy',
+            voice: 'shimmer', // CHANGED: Shimmer is warmer and more natural than Alloy
             input_audio_format: 'g711_ulaw',
             output_audio_format: 'g711_ulaw',
             input_audio_transcription: { model: 'whisper-1' },
             turn_detection: {
               type: 'server_vad',
-              threshold: 0.6,
+              threshold: 0.5, // CHANGED: Lower threshold for more natural conversation
               prefix_padding_ms: 300,
-              silence_duration_ms: 1200
+              silence_duration_ms: 800 // CHANGED: Shorter silence = more natural back-and-forth
             },
-            temperature: 0.9
+            temperature: 1.0, // CHANGED: Higher temperature = more natural variation
+            max_response_output_tokens: 150 // CHANGED: Shorter responses = more natural conversation
           }
         }));
       });
@@ -298,7 +338,7 @@ server.listen(PORT, () => {
   console.log('');
   console.log('🚀 Talkertive WebSocket Bridge Server');
   console.log('📡 Port:', PORT);
-  console.log('🎤 Voice: OpenAI Alloy (ElevenLabs coming soon)');
+  console.log('🎤 Voice: Shimmer (warm & human-like)');
   console.log('');
 });
 
