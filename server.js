@@ -128,7 +128,7 @@ function buildAIInstructions(userSettings) {
   instructions += '🎯 CRITICAL: SPEAK LIKE A REAL HUMAN RECEPTIONIST\n';
   instructions += '═══════════════════════════════════════════════════════\n\n';
   
-  instructions += 'You are a warm, friendly receptionist for ' + businessName + '.\n';
+  instructions += 'You are Krystle, a warm, friendly receptionist for ' + businessName + '.\n';
   instructions += 'Business Hours: ' + businessHours + '\n\n';
   
   if (customInstructions) {
@@ -137,8 +137,8 @@ function buildAIInstructions(userSettings) {
     instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
   }
   
-  instructions += 'GREETING:\n';
-  instructions += '"Hi! Thanks so much for calling ' + businessName + '! How can I help you today?"\n\n';
+  instructions += 'GREETING (USE THIS EXACTLY):\n';
+  instructions += '"Hi! Thank you for calling ' + businessName + ' today. My name is Krystle, how can I help you?"\n\n';
   
   instructions += 'SPEAKING STYLE (CRITICAL - SOUND HUMAN!):\n';
   instructions += '✅ Use natural conversational filler words: "um", "you know", "let me see", "hmm"\n';
@@ -169,7 +169,7 @@ function buildAIInstructions(userSettings) {
   instructions += '- Email: "What\'s a good email I can send some info to?"\n';
   instructions += '- Phone: "And what\'s a good callback number?"\n\n';
   
-  instructions += 'REMEMBER: You\'re a REAL person having a REAL conversation. Be warm, natural, and helpful!\n';
+  instructions += 'REMEMBER: You\'re Krystle - a REAL person having a REAL conversation. Be warm, natural, and helpful!\n';
   
   return instructions;
 }
@@ -265,25 +265,25 @@ wss.on('connection', async (ws, req) => {
         
         const instructions = buildAIInstructions(settings);
         
-        console.log('🎤 Voice: Shimmer (warm & natural)');
+        console.log('🎤 Voice: Shimmer (Krystle)');
         
         openaiWs.send(JSON.stringify({
           type: 'session.update',
           session: {
             modalities: ['text', 'audio'],
             instructions: instructions,
-            voice: 'shimmer', // CHANGED: Shimmer is warmer and more natural than Alloy
+            voice: 'shimmer',
             input_audio_format: 'g711_ulaw',
             output_audio_format: 'g711_ulaw',
             input_audio_transcription: { model: 'whisper-1' },
             turn_detection: {
               type: 'server_vad',
-              threshold: 0.5, // CHANGED: Lower threshold for more natural conversation
+              threshold: 0.5,
               prefix_padding_ms: 300,
-              silence_duration_ms: 800 // CHANGED: Shorter silence = more natural back-and-forth
+              silence_duration_ms: 800
             },
-            temperature: 1.0, // CHANGED: Higher temperature = more natural variation
-            max_response_output_tokens: 150 // CHANGED: Shorter responses = more natural conversation
+            temperature: 1.0,
+            max_response_output_tokens: 150
           }
         }));
       });
@@ -311,7 +311,7 @@ wss.on('connection', async (ws, req) => {
           }
           
           if (event.type === 'response.audio_transcript.done') {
-            console.log('🤖 AI:', event.transcript);
+            console.log('🤖 Krystle:', event.transcript);
           }
           
         } catch (error) {
@@ -338,7 +338,7 @@ server.listen(PORT, () => {
   console.log('');
   console.log('🚀 Talkertive WebSocket Bridge Server');
   console.log('📡 Port:', PORT);
-  console.log('🎤 Voice: Shimmer (warm & human-like)');
+  console.log('🎤 Receptionist: Krystle (Shimmer voice)');
   console.log('');
 });
 
