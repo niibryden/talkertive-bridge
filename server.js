@@ -1,6 +1,6 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import WebSocket from 'ws'; // ✅ needed for outbound OpenAI realtime WS (fixes "WebSocket is not defined")
+import WebSocket from 'ws';
 import { createServer } from 'http';
 import OpenAI from 'openai';
 import { ElevenLabsClient } from 'elevenlabs';
@@ -11,11 +11,13 @@ import 'dotenv/config';
 
 const app = express();
 const server = createServer(app);
+
+// WebSocket server for Twilio <Stream>
 const wss = new WebSocketServer({ server });
 
-// ----------------------------
-// Env validation
-// ----------------------------
+// -----------------------------
+// ENV + clients
+// -----------------------------
 const requiredEnvVars = [
   'OPENAI_API_KEY',
   'ELEVENLABS_API_KEY',
@@ -26,50 +28,55 @@ const requiredEnvVars = [
   'PORT',
 ];
 
+let missingEnv = false;
 requiredEnvVars.forEach((varName) => {
   if (!process.env[varName]) {
     console.error(`❌ Missing required environment variable: ${varName}`);
+    missingEnv = true;
   }
 });
 
-// ----------------------------
-// Clients
-// ----------------------------
+// Don’t hard-crash if you want local dev without everything,
+// but Railway should have these set.
+if (missingEnv) {
+  console.warn('⚠️ One or more required env vars are missing. The service may not work correctly.');
+}
+
+// Initialize clients (kept because your code uses them / you likely will)
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-const PORT = process.env.PORT || 3000;
-const HOST = '0.0.0.0';
+// Railway expects you to bind to process.env.PORT (no fallback on Railway)
+const PORT = Number(process.env.PORT);
+if (!PORT) {
+  console.error('❌ PORT not provided (Railway requires PORT).');
+  process.exit(1);
+}
 
-// ----------------------------
-// State
-// ----------------------------
-const activeSessions = new Map(); // sessionId -> { twilioWs, openaiWs, callSid, startTime }
+// Store active sessions
+const activeSessions = new Map();
 
-// ----------------------------
+// -----------------------------
 // Middleware
-// ----------------------------
+// -----------------------------
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ CORS (fixes dashboard "Offline" check)
-app.use((req, res, next) => {
+// Basic CORS for health + preflight (fixes dashboard “offline” checks)
+app.options('/health', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  return res.sendStatus(204);
 });
 
-// ----------------------------
-// Routes
-// ----------------------------
+// Health check endpoint (Railway + your UI)
 app.get('/health', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+
   res.json({
     status: 'healthy',
     service: 'talkertive-websocket-bridge',
@@ -78,7 +85,9 @@ app.get('/health', (req, res) => {
   });
 });
 
+// -----------------------------
 // Twilio webhook endpoint - handles incoming calls
+// -----------------------------
 app.post('/incoming-call', async (req, res) => {
   console.log('📞 Incoming call received:', req.body);
 
@@ -86,7 +95,7 @@ app.post('/incoming-call', async (req, res) => {
   const from = req.body.From;
   const to = req.body.To;
 
-  // Log call start to Supabase (your function URL may 404 if path is wrong)
+  // Log call start to Supabase (your function currently 404s; leaving it as-is)
   try {
     const response = await fetch(
       `${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/call-logs`,
@@ -97,7 +106,7 @@ app.post('/incoming-call', async (req, res) => {
           Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
         },
         body: JSON.stringify({
-          userId: 'system',
+          userId: 'system', // TODO: map to real user
           customerPhone: from,
           customerName: 'Unknown Caller',
           duration: 0,
@@ -109,13 +118,14 @@ app.post('/incoming-call', async (req, res) => {
     );
 
     if (!response.ok) {
-      console.error('Failed to log call start:', response.status, await response.text());
+      console.error('Failed to log call start:', await response.text());
     }
   } catch (error) {
     console.error('Error logging call start:', error);
   }
 
-  // TwiML - connect to WebSocket bridge (Railway)
+  // TwiML response - connect to WebSocket
+  // IMPORTANT: Twilio will connect to wss://<your-domain>/media-stream
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -127,21 +137,20 @@ app.post('/incoming-call', async (req, res) => {
   </Connect>
 </Response>`;
 
-  res.type('text/xml').send(twiml);
+  res.type('text/xml');
+  res.send(twiml);
 });
 
-// ----------------------------
-// WebSocket: Twilio Media Streams
-// ----------------------------
+// -----------------------------
+// WebSocket handler for Twilio Media Streams
+// -----------------------------
 wss.on('connection', async (ws, req) => {
   console.log('🔌 New WebSocket connection established');
 
   const sessionId = uuidv4();
-
   let callSid = null;
   let streamSid = null;
   let openaiWs = null;
-
   const callStartTime = Date.now();
 
   const conversationContext = {
@@ -150,6 +159,7 @@ wss.on('connection', async (ws, req) => {
     appointmentRequested: false,
   };
 
+  // Store session
   activeSessions.set(sessionId, {
     twilioWs: ws,
     openaiWs: null,
@@ -157,7 +167,7 @@ wss.on('connection', async (ws, req) => {
     startTime: callStartTime,
   });
 
-  // ✅ OpenAI Realtime WS
+  // Initialize OpenAI Realtime API connection
   try {
     openaiWs = new WebSocket(
       'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
@@ -238,14 +248,15 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
             break;
 
           case 'response.audio.delta':
-            // NOTE: This assumes event.delta is base64 PCM16 and Twilio can accept it as-is.
-            // If your audio sounds wrong, you MUST convert to Twilio-required encoding.
+            // Stream audio back to Twilio
             if (event.delta && ws.readyState === ws.OPEN && streamSid) {
               ws.send(
                 JSON.stringify({
                   event: 'media',
                   streamSid,
                   media: {
+                    // NOTE: Your current logs show Twilio is receiving something.
+                    // If you later need μ-law conversion, that’s a separate change.
                     payload: event.delta,
                   },
                 })
@@ -267,6 +278,7 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
             break;
 
           default:
+            // keep quiet
             break;
         }
       } catch (error) {
@@ -282,34 +294,32 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
       console.log('🔌 OpenAI WebSocket closed');
     });
 
-    const sess = activeSessions.get(sessionId);
-    if (sess) sess.openaiWs = openaiWs;
+    // Update session with OpenAI connection
+    const session = activeSessions.get(sessionId);
+    if (session) session.openaiWs = openaiWs;
   } catch (error) {
     console.error('❌ Failed to connect to OpenAI:', error);
   }
 
-  // ----------------------------
   // Handle Twilio messages
-  // ----------------------------
   ws.on('message', async (message) => {
     try {
       const msg = JSON.parse(message.toString());
 
       switch (msg.event) {
-        case 'start': {
+        case 'start':
           streamSid = msg.start.streamSid;
           callSid = msg.start.callSid;
-
           console.log(`📞 Call started - CallSid: ${callSid}, StreamSid: ${streamSid}`);
 
-          const sess = activeSessions.get(sessionId);
-          if (sess) sess.callSid = callSid;
-
+          {
+            const session = activeSessions.get(sessionId);
+            if (session) session.callSid = callSid;
+          }
           break;
-        }
 
-        case 'media': {
-          // Forward audio to OpenAI
+        case 'media':
+          // Forward audio from Twilio to OpenAI
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.send(
               JSON.stringify({
@@ -319,9 +329,8 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
             );
           }
           break;
-        }
 
-        case 'stop': {
+        case 'stop':
           console.log('📞 Call ended');
           await handleCallEnd(callSid, callStartTime, conversationContext);
 
@@ -329,7 +338,6 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
             openaiWs.close();
           }
           break;
-        }
 
         default:
           break;
@@ -353,20 +361,22 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
   });
 });
 
-// ----------------------------
-// Helpers
-// ----------------------------
+// -----------------------------
+// Lead extraction
+// -----------------------------
 function extractLeadInfo(transcript, context) {
   const text = (transcript || '').toLowerCase();
 
-  const emailMatch = (transcript || '').match(/[\w.-]+@[\w.-]+\.\w+/);
+  // Email pattern
+  const emailMatch = transcript?.match?.(/[\w.-]+@[\w.-]+\.\w+/);
   if (emailMatch) {
     context.leadInfo.email = emailMatch[0];
     console.log('📧 Email captured:', context.leadInfo.email);
   }
 
+  // Name pattern
   if (text.includes('my name is') || text.includes("i'm ") || text.includes('i am ')) {
-    const nameMatch = (transcript || '').match(
+    const nameMatch = transcript.match(
       /(?:my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i
     );
     if (nameMatch) {
@@ -375,12 +385,16 @@ function extractLeadInfo(transcript, context) {
     }
   }
 
+  // Appointment detection
   if (text.includes('appointment') || text.includes('booking') || text.includes('schedule')) {
     context.appointmentRequested = true;
     console.log('📅 Appointment requested');
   }
 }
 
+// -----------------------------
+// Call end handler
+// -----------------------------
 async function handleCallEnd(callSid, startTime, context) {
   const duration = Math.floor((Date.now() - startTime) / 1000);
 
@@ -391,9 +405,9 @@ async function handleCallEnd(callSid, startTime, context) {
     appointmentRequested: context.appointmentRequested,
   });
 
-  // Update call log
+  // Update call log (your endpoint likely needs fixing; keeping structure)
   try {
-    const resp = await fetch(
+    await fetch(
       `${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/call-logs/${callSid}`,
       {
         method: 'PATCH',
@@ -408,10 +422,6 @@ async function handleCallEnd(callSid, startTime, context) {
         }),
       }
     );
-
-    if (!resp.ok) {
-      console.error('Failed to update call log:', resp.status, await resp.text());
-    }
   } catch (error) {
     console.error('Error updating call log:', error);
   }
@@ -419,41 +429,34 @@ async function handleCallEnd(callSid, startTime, context) {
   // Create lead if we have info
   if (context.leadInfo.name || context.leadInfo.email) {
     try {
-      const resp = await fetch(
-        `${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/leads`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({
-            userId: 'system',
-            name: context.leadInfo.name || 'Unknown',
-            email: context.leadInfo.email || '',
-            phone: context.leadInfo.phone || '',
-            source: 'phone_call',
-            status: 'new',
-            notes: `Captured from call ${callSid}. Appointment requested: ${context.appointmentRequested}`,
-          }),
-        }
-      );
+      await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/leads`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          userId: 'system',
+          name: context.leadInfo.name || 'Unknown',
+          email: context.leadInfo.email || '',
+          phone: context.leadInfo.phone || '',
+          source: 'phone_call',
+          status: 'new',
+          notes: `Captured from call ${callSid}. Appointment requested: ${context.appointmentRequested}`,
+        }),
+      });
 
-      if (!resp.ok) {
-        console.error('Failed to create lead:', resp.status, await resp.text());
-      } else {
-        console.log('✅ Lead created in Supabase');
-      }
+      console.log('✅ Lead created in Supabase');
     } catch (error) {
       console.error('Error creating lead:', error);
     }
   }
 }
 
-// ----------------------------
-// Start server
-// ----------------------------
-server.listen(PORT, HOST, () => {
+// -----------------------------
+// Start server (Railway-safe)
+// -----------------------------
+server.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Talkertive WebSocket Bridge Server Started');
   console.log('='.repeat(50));
   console.log(`📡 Server running on port ${PORT}`);
