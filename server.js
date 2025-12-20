@@ -164,15 +164,92 @@ function buildAIInstructions(userSettings) {
   instructions += '4. Capture their info smoothly: "I\'d love to get your name for our records!"\n';
   instructions += '5. Keep it flowing - don\'t rush to end the call\n\n';
   
-  instructions += 'LEAD CAPTURE (naturally weave into conversation):\n';
-  instructions += '- Name: "By the way, what\'s your name?"\n';
-  instructions += '- Email: "What\'s a good email I can send some info to?"\n';
-  instructions += '- Phone: "And what\'s a good callback number?"\n\n';
+  instructions += 'LEAD CAPTURE (Use the capture_lead_info function when you get customer info):\n';
+  instructions += '- When they give you their name → call capture_lead_info with name\n';
+  instructions += '- When they give you their email → call capture_lead_info with email\n';
+  instructions += '- When they tell you what they need → call capture_lead_info with notes\n';
+  instructions += '- Call the function IMMEDIATELY when you get new info, don\'t wait until end of call\n\n';
+  
+  instructions += 'APPOINTMENT BOOKING (Use the book_appointment function when they want to schedule):\n';
+  instructions += '- Ask for preferred date and time naturally\n';
+  instructions += '- Get their name, phone, and email if you don\'t have it yet\n';
+  instructions += '- Call book_appointment with all the details\n';
+  instructions += '- Confirm: "Perfect! I\'ve got you scheduled for [date/time]. You\'ll receive a confirmation email shortly!"\n\n';
   
   instructions += 'REMEMBER: You\'re Krystle - a REAL person having a REAL conversation. Be warm, natural, and helpful!\n';
   
   return instructions;
 }
+
+// Define function tools for OpenAI
+const FUNCTION_TOOLS = [
+  {
+    type: 'function',
+    name: 'capture_lead_info',
+    description: 'Capture customer information in real-time during the conversation. Call this IMMEDIATELY when you learn new info about the customer, don\'t wait until the end of the call.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Customer\'s full name'
+        },
+        email: {
+          type: 'string',
+          description: 'Customer\'s email address'
+        },
+        phone: {
+          type: 'string',
+          description: 'Customer\'s phone number (if different from caller ID)'
+        },
+        notes: {
+          type: 'string',
+          description: 'Any important notes about what the customer needs or is asking about'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    type: 'function',
+    name: 'book_appointment',
+    description: 'Book an appointment for the customer. Call this when the customer wants to schedule a time to meet or have a service.',
+    parameters: {
+      type: 'object',
+      properties: {
+        customerName: {
+          type: 'string',
+          description: 'Customer\'s full name'
+        },
+        customerEmail: {
+          type: 'string',
+          description: 'Customer\'s email address'
+        },
+        customerPhone: {
+          type: 'string',
+          description: 'Customer\'s phone number'
+        },
+        dateTime: {
+          type: 'string',
+          description: 'Appointment date and time in ISO 8601 format (e.g., 2024-01-15T14:30:00-05:00)'
+        },
+        duration: {
+          type: 'number',
+          description: 'Duration of appointment in minutes (default: 30)'
+        },
+        purpose: {
+          type: 'string',
+          description: 'Purpose of the appointment (consultation, service, meeting, etc.)'
+        },
+        timeZone: {
+          type: 'string',
+          description: 'Time zone for the appointment (e.g., America/New_York, America/Los_Angeles)'
+        }
+      },
+      required: ['customerName', 'dateTime', 'purpose']
+    }
+  }
+];
 
 app.post('/incoming-call', async (req, res) => {
   console.log('📞 INCOMING CALL');
@@ -209,6 +286,16 @@ wss.on('connection', async (ws, req) => {
   let toPhoneNumber = null;
   let fromPhoneNumber = null;
   let userSettings = null;
+  let userId = null;
+  let callStartTime = new Date();
+  
+  // Track captured lead info
+  let capturedLeadInfo = {
+    name: null,
+    email: null,
+    phone: null,
+    notes: null
+  };
   
   ws.on('message', async (message) => {
     try {
@@ -225,8 +312,35 @@ wss.on('connection', async (ws, req) => {
           
           console.log('📞 CALL STARTED');
           console.log('   To Phone:', toPhoneNumber);
+          console.log('   From Phone:', fromPhoneNumber);
+          console.log('   Call SID:', callSid);
           
           userSettings = await getUserSettingsByPhone(toPhoneNumber);
+          userId = userSettings?.userId;
+          
+          if (userId) {
+            // Log call start to backend
+            try {
+              await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/calls/bridge-log', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
+                },
+                body: JSON.stringify({
+                  callSid,
+                  toNumber: toPhoneNumber,
+                  fromNumber: fromPhoneNumber,
+                  status: 'in-progress',
+                  duration: 0
+                })
+              });
+              console.log('✅ Call logged to backend');
+            } catch (err) {
+              console.error('⚠️ Failed to log call:', err.message);
+            }
+          }
+          
           await initializeOpenAI(userSettings);
           break;
           
@@ -241,6 +355,31 @@ wss.on('connection', async (ws, req) => {
           
         case 'stop':
           console.log('📞 CALL ENDED');
+          
+          // Calculate duration
+          const duration = Math.floor((new Date() - callStartTime) / 1000);
+          
+          // Update call log with final info
+          if (userId && callSid) {
+            try {
+              await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/calls/' + callSid, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
+                },
+                body: JSON.stringify({
+                  status: 'completed',
+                  duration,
+                  leadCaptured: !!(capturedLeadInfo.name || capturedLeadInfo.email)
+                })
+              });
+              console.log('✅ Call finalized in backend');
+            } catch (err) {
+              console.error('⚠️ Failed to finalize call:', err.message);
+            }
+          }
+          
           if (openaiWs) openaiWs.close();
           break;
       }
@@ -248,6 +387,119 @@ wss.on('connection', async (ws, req) => {
       console.error('❌ Error:', sanitizeForLog(error));
     }
   });
+  
+  async function handleFunctionCall(functionName, functionArgs) {
+    console.log('🔧 FUNCTION CALL:', functionName);
+    console.log('📋 Args:', sanitizeForLog(functionArgs));
+    
+    if (functionName === 'capture_lead_info') {
+      // Update captured lead info
+      if (functionArgs.name) capturedLeadInfo.name = functionArgs.name;
+      if (functionArgs.email) capturedLeadInfo.email = functionArgs.email;
+      if (functionArgs.phone) capturedLeadInfo.phone = functionArgs.phone;
+      if (functionArgs.notes) {
+        capturedLeadInfo.notes = capturedLeadInfo.notes 
+          ? capturedLeadInfo.notes + '\n' + functionArgs.notes
+          : functionArgs.notes;
+      }
+      
+      console.log('💾 Updated lead info:', sanitizeForLog(capturedLeadInfo));
+      
+      // Send to backend in real-time
+      if (userId) {
+        try {
+          const response = await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/leads/realtime-update', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
+            },
+            body: JSON.stringify({
+              userId,
+              callSid,
+              name: capturedLeadInfo.name,
+              email: capturedLeadInfo.email,
+              phone: capturedLeadInfo.phone || fromPhoneNumber,
+              notes: capturedLeadInfo.notes
+            })
+          });
+          
+          if (response.ok) {
+            console.log('✅ Lead updated in real-time!');
+          } else {
+            console.error('⚠️ Failed to update lead:', await response.text());
+          }
+        } catch (err) {
+          console.error('⚠️ Failed to update lead:', err.message);
+        }
+      }
+      
+      return JSON.stringify({ 
+        success: true, 
+        message: 'Lead information captured successfully' 
+      });
+    }
+    
+    if (functionName === 'book_appointment') {
+      console.log('📅 BOOKING APPOINTMENT');
+      
+      // Send appointment to backend
+      if (userId) {
+        try {
+          const response = await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/appointments/book', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
+            },
+            body: JSON.stringify({
+              userId,
+              callSid,
+              customerName: functionArgs.customerName || capturedLeadInfo.name,
+              customerEmail: functionArgs.customerEmail || capturedLeadInfo.email,
+              customerPhone: functionArgs.customerPhone || capturedLeadInfo.phone || fromPhoneNumber,
+              dateTime: functionArgs.dateTime,
+              duration: functionArgs.duration || 30,
+              purpose: functionArgs.purpose,
+              timeZone: functionArgs.timeZone || 'America/New_York'
+            })
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Appointment booked successfully!');
+            console.log('📅 Calendar event created:', result.calendarEventCreated);
+            
+            return JSON.stringify({ 
+              success: true, 
+              message: 'Appointment booked successfully. Confirmation will be sent via email.',
+              appointmentId: result.appointment?.id,
+              calendarEventCreated: result.calendarEventCreated
+            });
+          } else {
+            console.error('⚠️ Failed to book appointment:', await response.text());
+            return JSON.stringify({ 
+              success: false, 
+              message: 'Failed to book appointment. Please try again.' 
+            });
+          }
+        } catch (err) {
+          console.error('⚠️ Failed to book appointment:', err.message);
+          return JSON.stringify({ 
+            success: false, 
+            message: 'Failed to book appointment. Please try again.' 
+          });
+        }
+      }
+      
+      return JSON.stringify({ 
+        success: false, 
+        message: 'Unable to book appointment at this time.' 
+      });
+    }
+    
+    return JSON.stringify({ success: false, message: 'Unknown function' });
+  }
   
   async function initializeOpenAI(settings) {
     try {
@@ -266,6 +518,7 @@ wss.on('connection', async (ws, req) => {
         const instructions = buildAIInstructions(settings);
         
         console.log('🎤 Voice: Shimmer (Krystle)');
+        console.log('🔧 Tools: capture_lead_info, book_appointment');
         
         openaiWs.send(JSON.stringify({
           type: 'session.update',
@@ -283,7 +536,8 @@ wss.on('connection', async (ws, req) => {
               silence_duration_ms: 800
             },
             temperature: 1.0,
-            max_response_output_tokens: 150
+            max_response_output_tokens: 150,
+            tools: FUNCTION_TOOLS
           }
         }));
       });
@@ -314,6 +568,28 @@ wss.on('connection', async (ws, req) => {
             console.log('🤖 Krystle:', event.transcript);
           }
           
+          // Handle function calls
+          if (event.type === 'response.function_call_arguments.done') {
+            const functionName = event.name;
+            const functionArgs = JSON.parse(event.arguments);
+            
+            // Execute function
+            const result = await handleFunctionCall(functionName, functionArgs);
+            
+            // Send result back to OpenAI
+            openaiWs.send(JSON.stringify({
+              type: 'conversation.item.create',
+              item: {
+                type: 'function_call_output',
+                call_id: event.call_id,
+                output: result
+              }
+            }));
+            
+            // Continue the response
+            openaiWs.send(JSON.stringify({ type: 'response.create' }));
+          }
+          
         } catch (error) {
           console.error('❌ Error processing OpenAI message:', sanitizeForLog(error));
         }
@@ -336,9 +612,10 @@ wss.on('connection', async (ws, req) => {
 
 server.listen(PORT, () => {
   console.log('');
-  console.log('🚀 Talkertive WebSocket Bridge Server');
+  console.log('🚀 Talkertive WebSocket Bridge Server v2.0');
   console.log('📡 Port:', PORT);
   console.log('🎤 Receptionist: Krystle (Shimmer voice)');
+  console.log('🔧 Features: Real-time lead capture + Appointment booking');
   console.log('');
 });
 
