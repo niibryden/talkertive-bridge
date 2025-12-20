@@ -5,8 +5,7 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node server.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -21,14 +20,5 @@
     "dotenv": "^16.3.1",
     "uuid": "^9.0.1",
     "cors": "^2.8.5"
-  },
-  "keywords": [
-    "ai-receptionist",
-    "twilio",
-    "openai",
-    "elevenlabs",
-    "websocket"
-  ],
-  "author": "Talkertive.io",
-  "license": "MIT"
+  }
 }
