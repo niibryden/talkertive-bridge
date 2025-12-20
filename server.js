@@ -175,6 +175,7 @@ wss.on('connection', async (ws, req) => {
   let toPhoneNumber = null;
   let fromPhoneNumber = null;
   let userSettings = null;
+  let useElevenLabs = true; // Toggle for ElevenLabs
   
   ws.on('message', async (message) => {
     try {
@@ -217,55 +218,41 @@ wss.on('connection', async (ws, req) => {
   });
   
   async function initializeOpenAI(settings) {
-    // ElevenLabs TTS function
+    // ElevenLabs TTS function using SDK with proper streaming
     async function speakWithElevenLabs(text) {
       if (!text || text.trim() === '') return;
       
       try {
         console.log('🎤 ElevenLabs speaking:', text.substring(0, 60) + '...');
         
-        const response = await fetch(
-          `https://api.elevenlabs.io/v1/text-to-speech/nJvj5shg2xu1GKGxqfkE/stream`,
+        const audioStream = await elevenlabs.textToSpeech.convertAsStream(
+          'nJvj5shg2xu1GKGxqfkE',
           {
-            method: 'POST',
-            headers: {
-              'Accept': 'audio/mpeg',
-              'Content-Type': 'application/json',
-              'xi-api-key': process.env.ELEVENLABS_API_KEY
-            },
-            body: JSON.stringify({
-              text: text,
-              model_id: 'eleven_multilingual_v2',
-              voice_settings: {
-                stability: 0.5,
-                similarity_boost: 0.75
-              }
-            })
+            text: text,
+            model_id: 'eleven_turbo_v2_5',
+            output_format: 'ulaw_8000'
           }
         );
-
-        if (!response.ok) {
-          throw new Error('ElevenLabs API error: ' + response.status);
-        }
-
-        const audioBuffer = await response.arrayBuffer();
         
-        // Convert MP3 to mulaw for Twilio
-        const base64Audio = Buffer.from(audioBuffer).toString('base64');
-        
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            event: 'media',
-            streamSid: streamSid,
-            media: {
-              payload: base64Audio
-            }
-          }));
+        // Stream audio chunks to Twilio
+        for await (const chunk of audioStream) {
+          if (ws.readyState === WebSocket.OPEN) {
+            const base64Audio = Buffer.from(chunk).toString('base64');
+            ws.send(JSON.stringify({
+              event: 'media',
+              streamSid: streamSid,
+              media: {
+                payload: base64Audio
+              }
+            }));
+          }
         }
         
-        console.log('✅ ElevenLabs speech sent');
+        console.log('✅ ElevenLabs speech complete');
       } catch (error) {
         console.error('❌ ElevenLabs error:', sanitizeForLog(error));
+        console.log('⚠️  Falling back to OpenAI voice');
+        useElevenLabs = false;
       }
     }
     
@@ -315,15 +302,24 @@ wss.on('connection', async (ws, req) => {
             openaiWs.send(JSON.stringify({ type: 'response.create' }));
           }
           
-          // BLOCK OpenAI audio - we only want the transcript
-          if (event.type === 'response.audio.delta') {
-            // Ignore - don't send OpenAI audio to Twilio
+          if (event.type === 'response.audio.delta' && event.delta) {
+            // If ElevenLabs fails, use OpenAI audio as fallback
+            if (!useElevenLabs) {
+              const audioPayload = {
+                event: 'media',
+                streamSid: streamSid,
+                media: { payload: event.delta }
+              };
+              ws.send(JSON.stringify(audioPayload));
+            }
           }
           
           // Get the transcript and send to ElevenLabs
           if (event.type === 'response.audio_transcript.done') {
             console.log('🤖 AI:', event.transcript);
-            await speakWithElevenLabs(event.transcript);
+            if (useElevenLabs) {
+              await speakWithElevenLabs(event.transcript);
+            }
           }
           
           if (event.type === 'conversation.item.input_audio_transcription.completed') {
