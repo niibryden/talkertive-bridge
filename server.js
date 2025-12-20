@@ -133,73 +133,66 @@ function buildAIInstructions(userSettings) {
   console.log('🤖 BUILDING AI INSTRUCTIONS:');
   console.log('   Business Name: "' + businessName + '"');
   console.log('   Business Hours: "' + businessHours + '"');
-  console.log('   Custom Instructions:', customInstructions ? 'Yes (' + customInstructions.substring(0, 50) + '...)' : 'None');
+  console.log('   Custom AI Instructions:', customInstructions ? 'Yes (' + customInstructions.substring(0, 50) + '...)' : 'None');
   
-  let instructions = 'You are an energetic, friendly AI receptionist for ' + businessName + '.\n\n';
-  instructions += 'GREETING (Always start with this):\n';
-  instructions += '"Hi! Thanks so much for calling ' + businessName + '! How can I help you today?"\n\n';
-  instructions += 'BUSINESS INFORMATION:\n';
-  instructions += '- Business Name: ' + businessName + '\n';
-  instructions += '- Business Hours: ' + businessHours + '\n\n';
+  let instructions = '═══════════════════════════════════════════════════════\n';
+  instructions += '🚨 CRITICAL: YOU MUST FOLLOW THESE RULES STRICTLY\n';
+  instructions += '═══════════════════════════════════════════════════════\n\n';
   
+  instructions += 'IDENTITY:\n';
+  instructions += 'You are the AI receptionist for ' + businessName + '.\n';
+  instructions += 'Business Hours: ' + businessHours + '\n\n';
+  
+  // PRIORITIZE CUSTOM AI INSTRUCTIONS AT THE TOP
   if (customInstructions) {
-    instructions += 'CUSTOM BUSINESS INSTRUCTIONS:\n' + customInstructions + '\n\n';
+    instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    instructions += '🏢 BUSINESS INFORMATION & YOUR INSTRUCTIONS:\n';
+    instructions += '(FOLLOW THESE EXACTLY - THIS IS YOUR PRIMARY GUIDE)\n';
+    instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    instructions += customInstructions + '\n\n';
+    instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
   }
   
-  instructions += 'PERSONALITY:\n';
-  instructions += '- Be warm, upbeat, and enthusiastic! Use an energetic, conversational tone\n';
-  instructions += '- Smile through your voice - be genuinely excited to help\n';
-  instructions += '- Be patient and do not rush - let callers speak fully before responding\n';
-  instructions += '- Keep the conversation going naturally - do not be quick to end the call\n';
-  instructions += '- Ask follow-up questions to better understand their needs\n';
-  instructions += '- NEVER suggest ending the call unless the caller explicitly says goodbye or thanks you for your time\n';
-  instructions += '- Be helpful and knowledgeable about ' + businessName + '\n\n';
+  instructions += 'GREETING (Start every call with this):\n';
+  instructions += '"Hi! Thanks so much for calling ' + businessName + '! How can I help you today?"\n\n';
   
-  instructions += 'YOUR RESPONSIBILITIES:\n';
-  instructions += '1. Capture lead information naturally through conversation:\n';
+  instructions += 'CORE RESPONSIBILITIES:\n';
+  instructions += '1. Answer questions about ' + businessName + ' using the Business Information above\n';
+  instructions += '2. Capture lead information naturally:\n';
   instructions += '   - Full name: "I would love to get your name for our records!"\n';
-  instructions += '   - Email address: "What is the best email to send you information?"\n';
-  instructions += '   - Phone number: "And what is a good callback number?" (if they do not volunteer it)\n';
-  instructions += '   - Their need/inquiry: "Tell me more about what you are looking for! I am all ears."\n\n';
+  instructions += '   - Email: "What is the best email to send you information?"\n';
+  instructions += '   - Phone: "And what is a good callback number?"\n';
+  instructions += '   - Their inquiry: "Tell me more about what you are looking for!"\n\n';
   
-  instructions += '2. Answer questions about ' + businessName + ':\n';
-  instructions += '   - Be helpful and provide information based on what the caller asks\n';
-  instructions += '   - If you do not know specific details, say: "That is a great question! Let me take your information and have someone from our team get back to you with those details."\n';
-  instructions += '   - Reference our business hours: ' + businessHours + '\n\n';
+  instructions += '3. Schedule appointments:\n';
+  instructions += '   - "I would love to get you scheduled! When works best for you?"\n';
+  instructions += '   - Collect: preferred date/time, timezone\n\n';
   
-  instructions += '3. Offer to help schedule callbacks or appointments:\n';
-  instructions += '   - "I would love to get you scheduled! When works best for you this week?"\n';
-  instructions += '   - Collect: preferred date/time, their timezone\n';
-  instructions += '   - "How about Tuesday at 2pm, or would Thursday morning work better?"\n\n';
+  instructions += 'PERSONALITY:\n';
+  instructions += '- Warm, friendly, and professional\n';
+  instructions += '- Patient - wait for caller to finish speaking before responding\n';
+  instructions += '- Natural conversational tone\n';
+  instructions += '- Be helpful about ' + businessName + '\n\n';
   
-  instructions += '4. Handle inquiries professionally:\n';
-  instructions += '   - Listen carefully to what they need\n';
-  instructions += '   - Take detailed notes about their inquiry\n';
-  instructions += '   - Always offer to have someone call them back if you cannot answer\n';
-  instructions += '   - Example: "I want to make sure you get the exact information you need. Can I have someone from ' + businessName + ' give you a call back?"\n\n';
+  instructions += 'CONVERSATION GUIDELINES:\n';
+  instructions += '- Use natural acknowledgments: "Absolutely!", "Great question!", "I hear you!"\n';
+  instructions += '- Ask follow-up questions to understand their needs\n';
+  instructions += '- Keep the conversation flowing naturally\n';
+  instructions += '- DO NOT rush to end the call\n';
+  instructions += '- DO NOT speak immediately after greeting - WAIT for the caller to respond first\n\n';
   
-  instructions += 'CONVERSATION STYLE:\n';
-  instructions += '- Use natural filler words: "Absolutely!", "That is great!", "Oh, I would love to help with that!"\n';
-  instructions += '- Ask open-ended questions: "What else can I tell you?", "What would make this perfect for you?"\n';
-  instructions += '- Acknowledge what they say: "That makes total sense!", "I hear you!", "Great question!"\n';
-  instructions += '- Be persistent but friendly: Do not give up after one exchange - keep the conversation flowing\n';
-  instructions += '- Mirror their energy: If they are excited, be excited. If they are calm, be warm and professional.\n\n';
+  instructions += 'LANGUAGE:\n';
+  instructions += '- ALWAYS speak English by default\n';
+  instructions += '- Only switch languages if caller explicitly requests\n\n';
   
-  instructions += 'LANGUAGE PROTOCOL:\n';
-  instructions += '- ALWAYS speak in English by default\n';
-  instructions += '- Only switch to another language if the caller EXPLICITLY asks: "Can you speak Spanish?", "Hablas español?", etc.\n';
-  instructions += '- If unclear, ask: "Just to make sure I am helping you in the best way - would you prefer to continue in English or another language?"\n\n';
+  instructions += 'WHAT TO AVOID:\n';
+  instructions += '- Do not be robotic or scripted\n';
+  instructions += '- Do not rush responses\n';
+  instructions += '- Do not interrupt the caller\n';
+  instructions += '- Do not say "Is there anything else?" after every answer\n';
+  instructions += '- Do not provide details you do not know - offer a callback instead\n\n';
   
-  instructions += 'WHAT NOT TO DO:\n';
-  instructions += '- Do not rush to end the call\n';
-  instructions += '- Do not be robotic or stiff\n';
-  instructions += '- Do not just answer one question and ask if they need anything else\n';
-  instructions += '- Do not switch languages unless explicitly requested\n';
-  instructions += '- Do not say "Is there anything else I can help you with?" after every response\n';
-  instructions += '- Do not mention that you are an AI unless directly asked\n';
-  instructions += '- Do not provide specific business details you do not know - instead, offer a callback\n\n';
-  
-  instructions += 'KEEP THE ENERGY UP! You are not just answering questions - you are representing ' + businessName + ' and making a great first impression!';
+  instructions += '🎯 REMEMBER: Your primary job is to represent ' + businessName + ' professionally and capture lead information!';
   
   return instructions;
 }
@@ -207,8 +200,8 @@ function buildAIInstructions(userSettings) {
 app.post('/incoming-call', async (req, res) => {
   console.log('📞 INCOMING CALL');
   console.log('');
-  console.log('🔍 FULL REQUEST BODY (RAW):');
-  console.log(JSON.stringify(req.body, null, 2));
+  console.log('🔍 REQUEST BODY (SANITIZED):');
+  console.log(JSON.stringify(sanitizeForLog(req.body), null, 2));
   console.log('');
   
   const callSid = req.body.CallSid;
@@ -218,12 +211,9 @@ app.post('/incoming-call', async (req, res) => {
   const calledVia = req.body.CalledVia;
   const forwardedFrom = req.body.ForwardedFrom;
   
-  console.log('📋 PARSED CALL DETAILS:');
+  console.log('📋 CALL DETAILS:');
   console.log('   From:', from);
   console.log('   To:', to);
-  console.log('   Called:', called);
-  console.log('   CalledVia:', calledVia);
-  console.log('   ForwardedFrom:', forwardedFrom);
   console.log('   CallSid:', callSid);
   console.log('');
   
@@ -281,6 +271,7 @@ wss.on('connection', async (ws, req) => {
   let openaiWs = null;
   let callStartTime = Date.now();
   let toPhoneNumber = null;
+  let fromPhoneNumber = null;
   let userSettings = null;
   let conversationContext = {
     messages: [],
@@ -306,11 +297,13 @@ wss.on('connection', async (ws, req) => {
           
           const customParams = msg.start.customParameters;
           toPhoneNumber = customParams?.to || msg.start.to;
+          fromPhoneNumber = customParams?.from || msg.start.from;
           
           console.log('📞 CALL STARTED');
           console.log('   CallSid:', callSid);
           console.log('   StreamSid:', streamSid);
           console.log('   To Phone:', toPhoneNumber);
+          console.log('   From Phone:', fromPhoneNumber);
           
           const session = activeSessions.get(sessionId);
           if (session) {
@@ -340,7 +333,7 @@ wss.on('connection', async (ws, req) => {
           
         case 'stop':
           console.log('📞 CALL ENDED');
-          await handleCallEnd(callSid, callStartTime, conversationContext, toPhoneNumber);
+          await handleCallEnd(callSid, callStartTime, conversationContext, toPhoneNumber, fromPhoneNumber, userSettings);
           
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.close();
@@ -383,9 +376,9 @@ wss.on('connection', async (ws, req) => {
             },
             turn_detection: {
               type: 'server_vad',
-              threshold: 0.5,
+              threshold: 0.6,
               prefix_padding_ms: 300,
-              silence_duration_ms: 700
+              silence_duration_ms: 1200
             },
             temperature: 0.9,
             max_response_output_tokens: 4096
@@ -514,13 +507,22 @@ function extractLeadInfo(transcript, context) {
   }
 }
 
-async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
+async function handleCallEnd(callSid, startTime, context, toPhoneNumber, fromPhoneNumber, userSettings) {
   const duration = Math.floor((Date.now() - startTime) / 1000);
   
   console.log('📊 CALL SUMMARY:');
   console.log('   Duration:', duration + 's');
   console.log('   Lead Captured:', (!!context.leadInfo.name || !!context.leadInfo.email ? 'Yes' : 'No'));
   console.log('   Appointment Requested:', (context.appointmentRequested ? 'Yes' : 'No'));
+  
+  // Use the actual userId from settings, not 'system'
+  const userId = userSettings?.userId || 'unknown';
+  
+  // Store the caller's phone number if we don't have one from the conversation
+  if (!context.leadInfo.phone && fromPhoneNumber) {
+    context.leadInfo.phone = fromPhoneNumber;
+    console.log('📱 Using caller phone:', fromPhoneNumber);
+  }
   
   const callData = {
     callSid,
@@ -561,7 +563,7 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
           'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
         },
         body: JSON.stringify({
-          userId: 'system',
+          userId: userId,
           name: context.leadInfo.name || 'Unknown',
           email: context.leadInfo.email || '',
           phone: context.leadInfo.phone || '',
