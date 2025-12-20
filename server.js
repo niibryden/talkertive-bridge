@@ -3,7 +3,7 @@ import { WebSocketServer } from 'ws';
 import WebSocket from 'ws';
 import { createServer } from 'http';
 import OpenAI from 'openai';
-import { ElevenLabsClient } from 'elevenlabs';
+import { ElevenLabsClient, stream } from 'elevenlabs';
 import twilio from 'twilio';
 import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
@@ -36,19 +36,17 @@ requiredEnvVars.forEach((varName) => {
   }
 });
 
-// Don't hard-crash if you want local dev without everything,
-// but Railway should have these set.
 if (missingEnv) {
   console.warn('⚠️ One or more required env vars are missing. The service may not work correctly.');
 }
 
-// Initialize clients (kept because your code uses them / you likely will)
+// Initialize clients
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-// Railway expects you to bind to process.env.PORT (no fallback on Railway)
+// Railway expects you to bind to process.env.PORT
 const PORT = Number(process.env.PORT);
 if (!PORT) {
   console.error('❌ PORT not provided (Railway requires PORT).');
@@ -58,13 +56,15 @@ if (!PORT) {
 // Store active sessions
 const activeSessions = new Map();
 
+// ElevenLabs Voice ID - CHANGE THIS TO YOUR VOICE ID
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'; // Default: Bella
+
 // -----------------------------
 // Middleware
 // -----------------------------
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Basic CORS for health + preflight (fixes dashboard "offline" checks)
 app.options('/health', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -72,7 +72,6 @@ app.options('/health', (req, res) => {
   return res.sendStatus(204);
 });
 
-// Health check endpoint (Railway + your UI)
 app.get('/health', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -86,7 +85,7 @@ app.get('/health', (req, res) => {
 });
 
 // -----------------------------
-// Twilio webhook endpoint - handles incoming calls
+// Twilio webhook endpoint
 // -----------------------------
 app.post('/incoming-call', async (req, res) => {
   console.log('📞 Incoming call received:', req.body);
@@ -95,7 +94,6 @@ app.post('/incoming-call', async (req, res) => {
   const from = req.body.From;
   const to = req.body.To;
 
-  // Log call start to Supabase (your function currently 404s; leaving it as-is)
   try {
     const response = await fetch(
       `${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/call-logs`,
@@ -106,7 +104,7 @@ app.post('/incoming-call', async (req, res) => {
           Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
         },
         body: JSON.stringify({
-          userId: 'system', // TODO: map to real user
+          userId: 'system',
           customerPhone: from,
           customerName: 'Unknown Caller',
           duration: 0,
@@ -124,8 +122,6 @@ app.post('/incoming-call', async (req, res) => {
     console.error('Error logging call start:', error);
   }
 
-  // TwiML response - connect to WebSocket
-  // IMPORTANT: Twilio will connect to wss://<your-domain>/media-stream
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -140,6 +136,44 @@ app.post('/incoming-call', async (req, res) => {
   res.type('text/xml');
   res.send(twiml);
 });
+
+// -----------------------------
+// Helper: Convert text to speech with ElevenLabs
+// -----------------------------
+async function textToSpeech(text, twilioWs, streamSid) {
+  try {
+    console.log('🎤 ElevenLabs TTS:', text);
+
+    const audioStream = await elevenlabs.textToSpeech.convertAsStream(ELEVENLABS_VOICE_ID, {
+      text,
+      model_id: 'eleven_turbo_v2_5',
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.75,
+        style: 0.0,
+        use_speaker_boost: true,
+      },
+      output_format: 'ulaw_8000', // Twilio's format
+    });
+
+    // Stream audio chunks to Twilio
+    for await (const chunk of audioStream) {
+      if (twilioWs.readyState === WebSocket.OPEN && streamSid) {
+        twilioWs.send(
+          JSON.stringify({
+            event: 'media',
+            streamSid,
+            media: {
+              payload: chunk.toString('base64'),
+            },
+          })
+        );
+      }
+    }
+  } catch (error) {
+    console.error('❌ ElevenLabs TTS error:', error);
+  }
+}
 
 // -----------------------------
 // WebSocket handler for Twilio Media Streams
@@ -159,7 +193,6 @@ wss.on('connection', async (ws, req) => {
     appointmentRequested: false,
   };
 
-  // Store session
   activeSessions.set(sessionId, {
     twilioWs: ws,
     openaiWs: null,
@@ -167,7 +200,15 @@ wss.on('connection', async (ws, req) => {
     startTime: callStartTime,
   });
 
-  // Initialize OpenAI Realtime API connection
+  // Send initial greeting via ElevenLabs
+  const sendGreeting = async () => {
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for streamSid
+    if (streamSid) {
+      await textToSpeech('Hello! Thank you for calling. How can I help you today?', ws, streamSid);
+    }
+  };
+
+  // Initialize OpenAI Realtime API (TEXT ONLY mode with audio input)
   try {
     openaiWs = new WebSocket(
       'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
@@ -182,12 +223,12 @@ wss.on('connection', async (ws, req) => {
     openaiWs.on('open', () => {
       console.log('✅ Connected to OpenAI Realtime API');
 
-      // Configure session with Twilio's audio format (μ-law)
+      // Configure for TEXT responses (audio input, text output)
       openaiWs.send(
         JSON.stringify({
           type: 'session.update',
           session: {
-            modalities: ['text', 'audio'],
+            modalities: ['text'], // TEXT ONLY - we'll use ElevenLabs for voice
             instructions: `You are a professional AI receptionist for a business. You are friendly, helpful, and efficient.
 
 Your responsibilities:
@@ -209,9 +250,7 @@ If they want to book an appointment, ask:
 - Any special requirements
 
 Always be polite, professional, and warm. Keep responses concise for phone conversations.`,
-            voice: 'alloy',
-            input_audio_format: 'g711_ulaw', // ✅ FIXED: Twilio's native format
-            output_audio_format: 'g711_ulaw', // ✅ FIXED: Twilio's native format
+            input_audio_format: 'g711_ulaw',
             input_audio_transcription: { model: 'whisper-1' },
             turn_detection: {
               type: 'server_vad',
@@ -220,26 +259,21 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
               silence_duration_ms: 500,
             },
             temperature: 0.8,
-            max_response_output_tokens: 4096,
+            max_response_output_tokens: 150, // Shorter responses for phone
           },
         })
       );
 
-      // ✅ NEW: Send initial greeting after session is configured
+      // Trigger initial greeting
       setTimeout(() => {
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-          console.log('🎤 Triggering initial AI greeting...');
           openaiWs.send(
             JSON.stringify({
               type: 'response.create',
-              response: {
-                modalities: ['text', 'audio'],
-                instructions: 'Greet the caller warmly and ask how you can help them today.',
-              },
             })
           );
         }
-      }, 1000); // Wait 1 second for session to be fully ready
+      }, 1000);
     });
 
     openaiWs.on('message', async (data) => {
@@ -253,34 +287,24 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
 
           case 'session.updated':
             console.log('✅ OpenAI session updated');
+            sendGreeting(); // Send greeting after session ready
             break;
 
-          case 'conversation.item.created':
-            if (event.item?.content) {
-              conversationContext.messages.push({
-                role: event.item.role,
-                content: event.item.content,
-              });
+          case 'response.text.delta':
+            // Accumulate text response
+            if (!conversationContext.currentResponse) {
+              conversationContext.currentResponse = '';
             }
+            conversationContext.currentResponse += event.delta;
             break;
 
-          case 'response.audio.delta':
-            // Stream audio back to Twilio
-            if (event.delta && ws.readyState === ws.OPEN && streamSid) {
-              ws.send(
-                JSON.stringify({
-                  event: 'media',
-                  streamSid,
-                  media: {
-                    payload: event.delta, // Now in g711_ulaw format - Twilio's native format
-                  },
-                })
-              );
+          case 'response.text.done':
+            // Full text response received - convert to speech with ElevenLabs
+            if (conversationContext.currentResponse) {
+              console.log('🤖 AI Response:', conversationContext.currentResponse);
+              await textToSpeech(conversationContext.currentResponse, ws, streamSid);
+              conversationContext.currentResponse = '';
             }
-            break;
-
-          case 'response.audio_transcript.delta':
-            console.log('🤖 AI:', event.delta);
             break;
 
           case 'conversation.item.input_audio_transcription.completed':
@@ -293,7 +317,6 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
             break;
 
           default:
-            // keep quiet
             break;
         }
       } catch (error) {
@@ -309,7 +332,6 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
       console.log('🔌 OpenAI WebSocket closed');
     });
 
-    // Update session with OpenAI connection
     const session = activeSessions.get(sessionId);
     if (session) session.openaiWs = openaiWs;
   } catch (error) {
@@ -334,7 +356,7 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
           break;
 
         case 'media':
-          // Forward audio from Twilio to OpenAI (now both using g711_ulaw)
+          // Forward audio from Twilio to OpenAI
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.send(
               JSON.stringify({
@@ -382,14 +404,12 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
 function extractLeadInfo(transcript, context) {
   const text = (transcript || '').toLowerCase();
 
-  // Email pattern
   const emailMatch = transcript?.match?.(/[\w.-]+@[\w.-]+\.\w+/);
   if (emailMatch) {
     context.leadInfo.email = emailMatch[0];
     console.log('📧 Email captured:', context.leadInfo.email);
   }
 
-  // Name pattern
   if (text.includes('my name is') || text.includes("i'm ") || text.includes('i am ')) {
     const nameMatch = transcript.match(
       /(?:my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i
@@ -400,7 +420,6 @@ function extractLeadInfo(transcript, context) {
     }
   }
 
-  // Appointment detection
   if (text.includes('appointment') || text.includes('booking') || text.includes('schedule')) {
     context.appointmentRequested = true;
     console.log('📅 Appointment requested');
@@ -420,7 +439,6 @@ async function handleCallEnd(callSid, startTime, context) {
     appointmentRequested: context.appointmentRequested,
   });
 
-  // Update call log (your endpoint likely needs fixing; keeping structure)
   try {
     await fetch(
       `${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/call-logs/${callSid}`,
@@ -441,7 +459,6 @@ async function handleCallEnd(callSid, startTime, context) {
     console.error('Error updating call log:', error);
   }
 
-  // Create lead if we have info
   if (context.leadInfo.name || context.leadInfo.email) {
     try {
       await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/leads`, {
@@ -469,7 +486,7 @@ async function handleCallEnd(callSid, startTime, context) {
 }
 
 // -----------------------------
-// Start server (Railway-safe)
+// Start server
 // -----------------------------
 server.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Talkertive WebSocket Bridge Server Started');
@@ -478,6 +495,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🔌 WebSocket endpoint: /media-stream`);
   console.log(`📞 Twilio webhook: /incoming-call`);
   console.log(`❤️ Health check: /health`);
+  console.log(`🎤 ElevenLabs Voice ID: ${ELEVENLABS_VOICE_ID}`);
   console.log('='.repeat(50));
 
   console.log('✅ OpenAI:', process.env.OPENAI_API_KEY ? 'Configured' : '❌ Missing');
