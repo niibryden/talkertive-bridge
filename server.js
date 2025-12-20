@@ -206,14 +206,26 @@ function buildAIInstructions(userSettings) {
 
 app.post('/incoming-call', async (req, res) => {
   console.log('📞 INCOMING CALL');
+  console.log('');
+  console.log('🔍 FULL REQUEST BODY (RAW):');
+  console.log(JSON.stringify(req.body, null, 2));
+  console.log('');
   
   const callSid = req.body.CallSid;
   const from = req.body.From;
   const to = req.body.To;
+  const called = req.body.Called;
+  const calledVia = req.body.CalledVia;
+  const forwardedFrom = req.body.ForwardedFrom;
   
+  console.log('📋 PARSED CALL DETAILS:');
   console.log('   From:', from);
   console.log('   To:', to);
+  console.log('   Called:', called);
+  console.log('   CalledVia:', calledVia);
+  console.log('   ForwardedFrom:', forwardedFrom);
   console.log('   CallSid:', callSid);
+  console.log('');
   
   try {
     const response = await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/calls/bridge-log', {
