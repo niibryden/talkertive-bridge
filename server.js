@@ -1,158 +1,440 @@
-// websocket-bridge.js
-import { WebSocket, WebSocketServer } from 'ws';
+import express from 'express';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createServer } from 'http';
 import OpenAI from 'openai';
-import fetch from 'node-fetch';
+import { ElevenLabsClient } from 'elevenlabs';
+import twilio from 'twilio';
+import { createClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
+import cors from 'cors';
+import 'dotenv/config';
 
-const wss = new WebSocketServer({ port: 8080 });
+const app = express();
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+
+// Environment variables validation
+const requiredEnvVars = [
+  'OPENAI_API_KEY',
+  'ELEVENLABS_API_KEY',
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+  'SUPABASE_URL',
+  'SUPABASE_ANON_KEY',
+  'PORT'
+];
+
+requiredEnvVars.forEach(varName => {
+  if (!process.env[varName]) {
+    console.error(`❌ Missing required environment variable: ${varName}`);
+  }
+});
+
+// Initialize clients
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
+const PORT = process.env.PORT || 3000;
+
+// Store active sessions
+const activeSessions = new Map();
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cors());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    service: 'talkertive-websocket-bridge',
+    activeSessions: activeSessions.size,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Twilio webhook endpoint - handles incoming calls
+app.post('/incoming-call', async (req, res) => {
+  console.log('📞 Incoming call received:', req.body);
+  
+  const callSid = req.body.CallSid;
+  const from = req.body.From;
+  const to = req.body.To;
+  
+  // Log call start to Supabase
+  try {
+    const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/calls/bridge-log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({
+        toNumber: to,
+        fromNumber: from,
+        callSid: callSid,
+        status: 'in-progress',
+        duration: 0,
+        leadCaptured: false,
+        appointmentBooked: false
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Failed to log call start:', errorText);
+    } else {
+      const result = await response.json();
+      console.log('✅ Call logged to database:', result);
+    }
+  } catch (error) {
+    console.error('Error logging call start:', error);
+  }
+  
+  // TwiML response - connect to WebSocket
+  const hostHeader = req.headers.host || 'localhost:3000';
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="wss://${hostHeader}/media-stream">
+      <Parameter name="callSid" value="${callSid}" />
+      <Parameter name="from" value="${from}" />
+      <Parameter name="to" value="${to}" />
+    </Stream>
+  </Connect>
+</Response>`;
+  
+  res.type('text/xml');
+  res.send(twiml);
+});
+
+// WebSocket handler for Twilio Media Streams
 wss.on('connection', async (ws, req) => {
-  console.log('New Twilio MediaStream connection');
+  console.log('🔌 New WebSocket connection established');
   
-  // Extract call parameters from URL
-  const url = new URL(req.url, 'http://localhost');
-  const callSid = url.searchParams.get('callSid');
-  const userId = url.searchParams.get('userId');
-  
+  const sessionId = uuidv4();
+  let callSid = null;
   let streamSid = null;
-  let leadData = {
-    name: '',
-    phone: '',
-    email: '',
-    summary: '',
+  let openaiWs = null;
+  let callStartTime = Date.now();
+  let conversationContext = {
+    messages: [],
+    leadInfo: {},
+    appointmentRequested: false
+  };
+  
+  // Store session
+  activeSessions.set(sessionId, {
+    twilioWs: ws,
+    openaiWs: null,
+    callSid: null,
+    startTime: callStartTime
+  });
+  
+  // Initialize OpenAI Realtime API connection
+  try {
+    openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'OpenAI-Beta': 'realtime=v1'
+      }
+    });
+    
+    // Configure OpenAI session
+    openaiWs.on('open', () => {
+      console.log('✅ Connected to OpenAI Realtime API');
+      
+      // Send session configuration
+      openaiWs.send(JSON.stringify({
+        type: 'session.update',
+        session: {
+          modalities: ['text', 'audio'],
+          instructions: 'You are an energetic, friendly AI receptionist for the business that the caller is calling. GREETING (Always start with this): "Hi! Thanks so much for calling! How can I help you today?" PERSONALITY: Be warm, upbeat, and enthusiastic! Use an energetic, conversational tone. Be patient and do not rush. Keep the conversation going naturally. YOUR RESPONSIBILITIES: 1. Capture lead information naturally through conversation: Full name, Email address, Phone number, Their need or inquiry. 2. Answer questions about the business: Be helpful and provide information based on what the caller asks. If you do not know specific details, offer to have someone call them back. 3. Offer to help schedule callbacks or appointments. 4. Handle inquiries professionally. CONVERSATION STYLE: Use natural filler words, ask open-ended questions, acknowledge what they say, be persistent but friendly. LANGUAGE PROTOCOL: ALWAYS speak in English by default. Only switch to another language if the caller EXPLICITLY asks. KEEP THE ENERGY UP!',
+          voice: 'shimmer',
+          input_audio_format: 'pcm16',
+          output_audio_format: 'pcm16',
+          input_audio_transcription: {
+            model: 'whisper-1'
+          },
+          turn_detection: {
+            type: 'server_vad',
+            threshold: 0.5,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 700
+          },
+          temperature: 0.9,
+          max_response_output_tokens: 4096
+        }
+      }));
+    });
+    
+    // Handle OpenAI responses
+    openaiWs.on('message', async (data) => {
+      try {
+        const event = JSON.parse(data.toString());
+        
+        // Handle different event types
+        switch (event.type) {
+          case 'session.created':
+            console.log('✅ OpenAI session created');
+            break;
+            
+          case 'session.updated':
+            console.log('✅ OpenAI session updated');
+            
+            // Trigger the AI to greet the caller immediately
+            console.log('🎤 Triggering initial greeting...');
+            openaiWs.send(JSON.stringify({
+              type: 'response.create',
+              response: {
+                modalities: ['text', 'audio'],
+                instructions: 'Greet the caller warmly with: "Hi! Thanks so much for calling! How can I help you today?"'
+              }
+            }));
+            break;
+            
+          case 'conversation.item.created':
+            // Track conversation
+            if (event.item && event.item.content) {
+              conversationContext.messages.push({
+                role: event.item.role,
+                content: event.item.content
+              });
+            }
+            break;
+            
+          case 'response.audio.delta':
+            // Stream audio back to Twilio
+            if (event.delta && ws.readyState === ws.OPEN) {
+              const audioPayload = {
+                event: 'media',
+                streamSid: streamSid,
+                media: {
+                  payload: event.delta
+                }
+              };
+              ws.send(JSON.stringify(audioPayload));
+            }
+            break;
+            
+          case 'response.audio_transcript.delta':
+            // Log AI responses
+            console.log('🤖 AI:', event.delta);
+            break;
+            
+          case 'conversation.item.input_audio_transcription.completed':
+            // Log user speech
+            console.log('👤 User:', event.transcript);
+            
+            // Extract lead information from conversation
+            extractLeadInfo(event.transcript, conversationContext);
+            break;
+            
+          case 'error':
+            console.error('❌ OpenAI error:', event.error);
+            break;
+        }
+      } catch (error) {
+        console.error('Error processing OpenAI message:', error);
+      }
+    });
+    
+    openaiWs.on('error', (error) => {
+      console.error('❌ OpenAI WebSocket error:', error);
+    });
+    
+    openaiWs.on('close', () => {
+      console.log('🔌 OpenAI WebSocket closed');
+    });
+    
+    // Update session with OpenAI connection
+    const session = activeSessions.get(sessionId);
+    if (session) {
+      session.openaiWs = openaiWs;
+    }
+    
+  } catch (error) {
+    console.error('❌ Failed to connect to OpenAI:', error);
+  }
+  
+  // Handle Twilio messages
+  ws.on('message', async (message) => {
+    try {
+      const msg = JSON.parse(message.toString());
+      
+      switch (msg.event) {
+        case 'start':
+          streamSid = msg.start.streamSid;
+          callSid = msg.start.callSid;
+          console.log(`📞 Call started - CallSid: ${callSid}, StreamSid: ${streamSid}`);
+          
+          // Update session
+          const session = activeSessions.get(sessionId);
+          if (session) {
+            session.callSid = callSid;
+          }
+          break;
+          
+        case 'media':
+          // Forward audio from Twilio to OpenAI
+          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            const audioAppend = {
+              type: 'input_audio_buffer.append',
+              audio: msg.media.payload
+            };
+            openaiWs.send(JSON.stringify(audioAppend));
+          }
+          break;
+          
+        case 'stop':
+          console.log('📞 Call ended');
+          await handleCallEnd(callSid, callStartTime, conversationContext);
+          
+          // Close OpenAI connection
+          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.close();
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('Error processing Twilio message:', error);
+    }
+  });
+  
+  ws.on('close', () => {
+    console.log('🔌 Twilio WebSocket closed');
+    activeSessions.delete(sessionId);
+    
+    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+      openaiWs.close();
+    }
+  });
+  
+  ws.on('error', (error) => {
+    console.error('❌ Twilio WebSocket error:', error);
+  });
+});
+
+// Extract lead information from conversation
+function extractLeadInfo(transcript, context) {
+  const text = transcript.toLowerCase();
+  
+  // Email pattern
+  const emailMatch = transcript.match(/[\w.-]+@[\w.-]+\.\w+/);
+  if (emailMatch) {
+    context.leadInfo.email = emailMatch[0];
+    console.log('📧 Email captured:', context.leadInfo.email);
+  }
+  
+  // Name pattern
+  if (text.includes('my name is') || text.includes("i'm ")) {
+    const nameMatch = transcript.match(/(?:my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+    if (nameMatch) {
+      context.leadInfo.name = nameMatch[1];
+      console.log('👤 Name captured:', context.leadInfo.name);
+    }
+  }
+  
+  // Appointment detection
+  if (text.includes('appointment') || text.includes('booking') || text.includes('schedule')) {
+    context.appointmentRequested = true;
+    console.log('📅 Appointment requested');
+  }
+}
+
+// Handle call end - log to Supabase
+async function handleCallEnd(callSid, startTime, context) {
+  const duration = Math.floor((Date.now() - startTime) / 1000);
+  
+  console.log('📊 Call summary:', {
+    callSid,
+    duration,
+    leadInfo: context.leadInfo,
+    appointmentRequested: context.appointmentRequested
+  });
+  
+  const callData = {
+    callSid,
+    duration,
+    status: 'completed',
+    leadCaptured: !!(context.leadInfo.name || context.leadInfo.email),
+    appointmentBooked: context.appointmentRequested,
+    leadInfo: context.leadInfo,
     timestamp: new Date().toISOString()
   };
   
-  // Connect to ChatGPT Realtime API
-  const realtimeSession = await openai.chat.completions.create({
-    model: "gpt-4-realtime-preview",
-    stream: true,
-    messages: [{
-      role: "system",
-      content: `You are a friendly AI receptionist. Your job is to:
-1. Greet the caller warmly
-2. Ask for their name, phone number, and email
-3. Ask why they're calling
-4. Offer to schedule an appointment if appropriate
-5. Be conversational and natural
-
-Always extract and remember:
-- Full name
-- Phone number  
-- Email address
-- Reason for calling
-- Whether they want an appointment`
-    }]
-  });
+  // Update call log in Supabase
+  try {
+    await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/calls/${callSid}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({
+        duration,
+        status: 'completed',
+        leadCaptured: callData.leadCaptured,
+        appointmentBooked: context.appointmentRequested
+      })
+    });
+    
+    console.log('✅ Call log updated in Supabase');
+  } catch (error) {
+    console.error('Error updating call log:', error);
+  }
   
-  // Handle incoming messages from Twilio
-  ws.on('message', async (message) => {
-    const msg = JSON.parse(message);
-    
-    if (msg.event === 'start') {
-      streamSid = msg.start.streamSid;
-      console.log(`MediaStream started: ${streamSid}`);
-    }
-    
-    if (msg.event === 'media') {
-      // Forward audio to ChatGPT Realtime
-      const audioChunk = Buffer.from(msg.media.payload, 'base64');
-      // Process with ChatGPT + ElevenLabs
-      // ... implementation details ...
-    }
-    
-    if (msg.event === 'stop') {
-      console.log('Call ended, sending lead data to platform');
-      
-      // Send lead data to your platform
-      await fetch(`https://YOUR_PROJECT_ID.supabase.co/functions/v1/make-server-4e1c9511/webhook/lead-done`, {
+  // Create lead if we have information
+  if (context.leadInfo.name || context.leadInfo.email) {
+    try {
+      await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/leads`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
         },
         body: JSON.stringify({
-          ...leadData,
-          callSid,
-          userId
+          userId: 'system',
+          name: context.leadInfo.name || 'Unknown',
+          email: context.leadInfo.email || '',
+          phone: context.leadInfo.phone || '',
+          source: 'phone_call',
+          status: 'new',
+          notes: `Captured from call ${callSid}. Appointment requested: ${context.appointmentRequested}`
         })
       });
+      
+      console.log('✅ Lead created in Supabase');
+    } catch (error) {
+      console.error('Error creating lead:', error);
     }
-  });
+  }
+}
+
+// Start server
+server.listen(PORT, () => {
+  console.log('🚀 Talkertive WebSocket Bridge Server Started');
+  console.log('━'.repeat(50));
+  console.log(`📡 Server running on port ${PORT}`);
+  console.log(`🔗 WebSocket endpoint: ws://localhost:${PORT}/media-stream`);
+  console.log(`📞 Twilio webhook: http://localhost:${PORT}/incoming-call`);
+  console.log(`❤️  Health check: http://localhost:${PORT}/health`);
+  console.log('━'.repeat(50));
+  console.log('✅ OpenAI:', process.env.OPENAI_API_KEY ? 'Configured' : '❌ Missing');
+  console.log('✅ ElevenLabs:', process.env.ELEVENLABS_API_KEY ? 'Configured' : '❌ Missing');
+  console.log('✅ Twilio:', process.env.TWILIO_ACCOUNT_SID ? 'Configured' : '❌ Missing');
+  console.log('✅ Supabase:', process.env.SUPABASE_URL ? 'Configured' : '❌ Missing');
+  console.log('━'.repeat(50));
 });
 
-console.log('WebSocket bridge running on wss://localhost:8080');
-```
-
-**Deployment Steps:**
-1. Deploy to a hosting service with WebSocket support
-2. Get your public WSS URL (e.g., `wss://your-bridge.railway.app`)
-3. Update n8n workflow with the real URL
-4. Configure environment variables
-
----
-
-### Option 2: Use a Pre-Built Service (Quickest)
-
-There are several services that handle Twilio + AI voice:
-
-1. **Vocode.dev**
-   - Website: https://vocode.dev
-   - Pre-built Twilio + ChatGPT + ElevenLabs integration
-   - Provides webhook URLs you can use directly
-   - Pricing: ~$0.10/minute + AI costs
-
-2. **Bland.ai**
-   - Website: https://bland.ai
-   - Full conversational AI for phone calls
-   - Has webhook support for lead capture
-   - Pricing: Custom
-
-3. **Synthflow.ai**
-   - Website: https://synthflow.ai
-   - No-code AI phone agent builder
-   - Twilio integration built-in
-   - Pricing: From $30/month
-
-**Setup with Pre-Built Service:**
-1. Sign up for the service
-2. Create an AI agent with your receptionist script
-3. Get the WebSocket/Webhook URL from the service
-4. Configure the service to send lead data to your platform backend:
-   ```
-   https://YOUR_PROJECT_ID.supabase.co/functions/v1/make-server-4e1c9511/webhook/lead-done
-   ```
-5. Update your n8n workflow with the service's WebSocket URL
-
----
-
-### Option 3: Simplified Testing Setup (For Development)
-
-For testing purposes, you can use a mock WebSocket that doesn't do real AI:
-
-```javascript
-// mock-websocket-bridge.js
-import { WebSocketServer } from 'ws';
-
-const wss = new WebSocketServer({ port: 8080 });
-
-wss.on('connection', (ws) => {
-  console.log('Mock WebSocket connected');
-  
-  ws.on('message', (message) => {
-    const msg = JSON.parse(message);
-    console.log('Received:', msg.event);
-    
-    if (msg.event === 'start') {
-      console.log('Call started');
-      
-      // Simulate a short call ending with lead data
-      setTimeout(() => {
-        console.log('Simulating call end with lead data');
-        // In real setup, Twilio sends 'stop' event
-        // For testing, manually trigger lead webhook
-      }, 5000);
-    }
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
   });
 });
