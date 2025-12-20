@@ -405,7 +405,7 @@ wss.on('connection', async (ws, req) => {
         openaiWs.send(JSON.stringify({
           type: 'session.update',
           session: {
-            modalities: ['text'],  // TEXT ONLY - no audio from OpenAI
+            modalities: ['text', 'audio'],  // Accept audio input, generate text output
             instructions: instructions,
             input_audio_format: 'g711_ulaw',
             input_audio_transcription: {
