@@ -438,9 +438,14 @@ wss.on('connection', async (ws, req) => {
               const businessName = settings?.businessName || 'the business';
               console.log('🎤 Triggering greeting with business name: "' + businessName + '"');
               
-              // Send greeting as TEXT to be spoken by ElevenLabs
-              const greetingText = `Hi! Thanks so much for calling ${businessName}! How can I help you today?`;
-              await speakWithElevenLabs(greetingText);
+              // Trigger OpenAI to generate the greeting text
+              openaiWs.send(JSON.stringify({
+                type: 'response.create',
+                response: {
+                  modalities: ['text'],
+                  instructions: `Greet the caller with: "Hi! Thanks so much for calling ${businessName}! How can I help you today?"`
+                }
+              }));
               break;
               
             case 'conversation.item.created':
