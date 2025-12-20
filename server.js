@@ -355,17 +355,17 @@ wss.on('connection', async (ws, req) => {
         console.log('🎤 ElevenLabs speaking:', text.substring(0, 50) + '...');
         
         const audioStream = await elevenlabs.textToSpeech.convertAsStream(
-          'nJvj5shg2xu1GKGxqfkE',  // Voice ID
+          'nJvj5shg2xu1GKGxqfkE',
           {
             text: text,
             model_id: 'eleven_multilingual_v2',
-            output_format: 'ulaw_8000'  // Match Twilio format
+            output_format: 'ulaw_8000'
           }
         );
         
         // Stream audio chunks to Twilio
         for await (const chunk of audioStream) {
-          if (ws.readyState === ws.OPEN) {
+          if (ws.readyState === WebSocket.OPEN) {
             const base64Audio = Buffer.from(chunk).toString('base64');
             const audioPayload = {
               event: 'media',
@@ -405,7 +405,7 @@ wss.on('connection', async (ws, req) => {
         openaiWs.send(JSON.stringify({
           type: 'session.update',
           session: {
-            modalities: ['text', 'audio'],  // Accept audio input, generate text output
+            modalities: ['text', 'audio'],
             instructions: instructions,
             input_audio_format: 'g711_ulaw',
             input_audio_transcription: {
@@ -438,14 +438,9 @@ wss.on('connection', async (ws, req) => {
               const businessName = settings?.businessName || 'the business';
               console.log('🎤 Triggering greeting with business name: "' + businessName + '"');
               
-              // Trigger OpenAI to generate the greeting text
-              openaiWs.send(JSON.stringify({
-                type: 'response.create',
-                response: {
-                  modalities: ['text'],
-                  instructions: `Greet the caller with: "Hi! Thanks so much for calling ${businessName}! How can I help you today?"`
-                }
-              }));
+              // Send greeting directly to ElevenLabs
+              const greetingText = `Hi! Thanks so much for calling ${businessName}! How can I help you today?`;
+              await speakWithElevenLabs(greetingText);
               break;
               
             case 'conversation.item.created':
@@ -463,7 +458,6 @@ wss.on('connection', async (ws, req) => {
               break;
               
             case 'response.text.delta':
-              // Accumulate text chunks
               if (!conversationContext.currentResponse) {
                 conversationContext.currentResponse = '';
               }
@@ -471,14 +465,11 @@ wss.on('connection', async (ws, req) => {
               break;
               
             case 'response.text.done':
-              // Full text response received from OpenAI
               const fullText = conversationContext.currentResponse || event.text;
               console.log('🤖 AI Response:', fullText);
               
-              // Send to ElevenLabs for speech synthesis
               await speakWithElevenLabs(fullText);
               
-              // Clear the accumulated response
               conversationContext.currentResponse = '';
               break;
               
@@ -556,10 +547,8 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber, fromPho
   console.log('   Lead Captured:', (!!context.leadInfo.name || !!context.leadInfo.email ? 'Yes' : 'No'));
   console.log('   Appointment Requested:', (context.appointmentRequested ? 'Yes' : 'No'));
   
-  // Use the actual userId from settings, not 'system'
   const userId = userSettings?.userId || 'unknown';
   
-  // Store the caller's phone number if we don't have one from the conversation
   if (!context.leadInfo.phone && fromPhoneNumber) {
     context.leadInfo.phone = fromPhoneNumber;
     console.log('📱 Using caller phone:', fromPhoneNumber);
