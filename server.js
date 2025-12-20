@@ -36,7 +36,7 @@ requiredEnvVars.forEach((varName) => {
   }
 });
 
-// Don’t hard-crash if you want local dev without everything,
+// Don't hard-crash if you want local dev without everything,
 // but Railway should have these set.
 if (missingEnv) {
   console.warn('⚠️ One or more required env vars are missing. The service may not work correctly.');
@@ -64,7 +64,7 @@ const activeSessions = new Map();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Basic CORS for health + preflight (fixes dashboard “offline” checks)
+// Basic CORS for health + preflight (fixes dashboard "offline" checks)
 app.options('/health', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -182,6 +182,7 @@ wss.on('connection', async (ws, req) => {
     openaiWs.on('open', () => {
       console.log('✅ Connected to OpenAI Realtime API');
 
+      // Configure session with Twilio's audio format (μ-law)
       openaiWs.send(
         JSON.stringify({
           type: 'session.update',
@@ -209,8 +210,8 @@ If they want to book an appointment, ask:
 
 Always be polite, professional, and warm. Keep responses concise for phone conversations.`,
             voice: 'alloy',
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
+            input_audio_format: 'g711_ulaw', // ✅ FIXED: Twilio's native format
+            output_audio_format: 'g711_ulaw', // ✅ FIXED: Twilio's native format
             input_audio_transcription: { model: 'whisper-1' },
             turn_detection: {
               type: 'server_vad',
@@ -223,6 +224,22 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
           },
         })
       );
+
+      // ✅ NEW: Send initial greeting after session is configured
+      setTimeout(() => {
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+          console.log('🎤 Triggering initial AI greeting...');
+          openaiWs.send(
+            JSON.stringify({
+              type: 'response.create',
+              response: {
+                modalities: ['text', 'audio'],
+                instructions: 'Greet the caller warmly and ask how you can help them today.',
+              },
+            })
+          );
+        }
+      }, 1000); // Wait 1 second for session to be fully ready
     });
 
     openaiWs.on('message', async (data) => {
@@ -255,9 +272,7 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
                   event: 'media',
                   streamSid,
                   media: {
-                    // NOTE: Your current logs show Twilio is receiving something.
-                    // If you later need μ-law conversion, that’s a separate change.
-                    payload: event.delta,
+                    payload: event.delta, // Now in g711_ulaw format - Twilio's native format
                   },
                 })
               );
@@ -319,7 +334,7 @@ Always be polite, professional, and warm. Keep responses concise for phone conve
           break;
 
         case 'media':
-          // Forward audio from Twilio to OpenAI
+          // Forward audio from Twilio to OpenAI (now both using g711_ulaw)
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.send(
               JSON.stringify({
