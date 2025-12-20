@@ -1,11 +1,3 @@
-📋 COMPLETE SERVER.JS CODE - COPY THIS ⬇️
-Instructions:
-
-Open your local websocket-bridge/server.js file
-Delete EVERYTHING in it
-Copy the code below and paste it in
-Save the file
-Deploy to Railway
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
@@ -21,10 +13,9 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-// ============= ENHANCED SECURITY: Credential Sanitization =============
+// ============= SECURITY: Credential Sanitization =============
 function sanitizeForLog(obj) {
   if (typeof obj === 'string') {
-    // Mask API keys, tokens, and bearer tokens in strings
     return obj.replace(/sk-[a-zA-Z0-9_-]{20,}/g, 'sk-***REDACTED***')
               .replace(/sk-proj-[a-zA-Z0-9_-]{20,}/g, 'sk-proj-***REDACTED***')
               .replace(/AC[a-z0-9]{32}/g, 'AC***REDACTED***')
@@ -33,7 +24,6 @@ function sanitizeForLog(obj) {
               .replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, 'JWT***REDACTED***');
   }
   if (typeof obj === 'object' && obj !== null) {
-    // Handle Error objects specially
     if (obj instanceof Error) {
       return {
         name: obj.name,
@@ -44,7 +34,6 @@ function sanitizeForLog(obj) {
     const sanitized = {};
     for (const key in obj) {
       const lowerKey = key.toLowerCase();
-      // Check if key contains sensitive terms
       if (['apikey', 'api_key', 'token', 'password', 'secret', 'auth', 'bearer', 'key', 'sid', 'credential'].some(k => lowerKey.includes(k))) {
         sanitized[key] = '***REDACTED***';
       } else {
@@ -56,14 +45,10 @@ function sanitizeForLog(obj) {
   return obj;
 }
 
-// Test sanitization on startup
-console.log('🔒 SECURITY TEST - Sanitization Check:');
-console.log('Test 1:', sanitizeForLog('Key: sk-1234567890abcdefghij1234567890'));
-console.log('Test 2:', sanitizeForLog({ apiKey: 'sk-test', data: 'safe' }));
-console.log('Expected: All keys should show as ***REDACTED***');
+console.log('🔒 SECURITY TEST:');
+console.log('Test:', sanitizeForLog('Key: sk-1234567890abcdefghij'));
 console.log('');
 
-// Environment variables validation (don't log actual values)
 const requiredEnvVars = [
   'OPENAI_API_KEY',
   'ELEVENLABS_API_KEY',
@@ -74,30 +59,25 @@ const requiredEnvVars = [
   'PORT'
 ];
 
-console.log('🔧 Environment Variables Check:');
+console.log('🔧 Environment Check:');
 requiredEnvVars.forEach(varName => {
   const exists = !!process.env[varName];
   console.log(`  ${exists ? '✅' : '❌'} ${varName}: ${exists ? 'Configured' : 'MISSING'}`);
 });
 console.log('');
 
-// Initialize clients
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const PORT = process.env.PORT || 3000;
-
-// Store active sessions
 const activeSessions = new Map();
 
-// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -107,21 +87,20 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ============= FETCH USER SETTINGS BY PHONE NUMBER =============
 async function getUserSettingsByPhone(phoneNumber) {
   try {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('🔍 FETCHING USER SETTINGS');
-    console.log(`📞 Looking up phone: ${phoneNumber}`);
-    console.log(`🔗 Endpoint: ${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/settings/by-phone/${encodeURIComponent(phoneNumber)}`);
+    console.log('📞 Looking up phone:', phoneNumber);
+    console.log('🔗 Endpoint:', process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/settings/by-phone/' + encodeURIComponent(phoneNumber));
     
-    const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/settings/by-phone/${encodeURIComponent(phoneNumber)}`, {
+    const response = await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/settings/by-phone/' + encodeURIComponent(phoneNumber), {
       headers: {
-        'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+        'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
       }
     });
     
-    console.log(`📡 Response status: ${response.status} ${response.statusText}`);
+    console.log('📡 Response status:', response.status, response.statusText);
     
     if (response.ok) {
       const data = await response.json();
@@ -146,87 +125,85 @@ async function getUserSettingsByPhone(phoneNumber) {
   }
 }
 
-// ============= BUILD DYNAMIC AI INSTRUCTIONS =============
 function buildAIInstructions(userSettings) {
   const businessName = userSettings?.businessName || 'the business';
   const businessHours = userSettings?.businessHours || 'standard business hours';
   const customInstructions = userSettings?.aiPrompt || '';
   
   console.log('🤖 BUILDING AI INSTRUCTIONS:');
-  console.log(`   Business Name: "${businessName}"`);
-  console.log(`   Business Hours: "${businessHours}"`);
-  console.log(`   Custom Instructions: ${customInstructions ? 'Yes (' + customInstructions.substring(0, 50) + '...)' : 'None'}`);
+  console.log('   Business Name: "' + businessName + '"');
+  console.log('   Business Hours: "' + businessHours + '"');
+  console.log('   Custom Instructions:', customInstructions ? 'Yes (' + customInstructions.substring(0, 50) + '...)' : 'None');
   
-  const baseInstructions = `You are an energetic, friendly AI receptionist for ${businessName}.
-
-GREETING (Always start with this):
-"Hi! Thanks so much for calling ${businessName}! How can I help you today?"
-
-BUSINESS INFORMATION:
-- Business Name: ${businessName}
-- Business Hours: ${businessHours}
-
-${customInstructions ? `CUSTOM BUSINESS INSTRUCTIONS:\n${customInstructions}\n` : ''}
-
-PERSONALITY:
-- Be warm, upbeat, and enthusiastic! Use an energetic, conversational tone
-- Smile through your voice - be genuinely excited to help
-- Be patient and don't rush - let callers speak fully before responding
-- Keep the conversation going naturally - don't be quick to end the call
-- Ask follow-up questions to better understand their needs
-- NEVER suggest ending the call unless the caller explicitly says goodbye or thanks you for your time
-- Be helpful and knowledgeable about ${businessName}
-
-YOUR RESPONSIBILITIES:
-1. Capture lead information naturally through conversation:
-   - Full name: "I'd love to get your name for our records!"
-   - Email address: "What's the best email to send you information?"
-   - Phone number: "And what's a good callback number?" (if they don't volunteer it)
-   - Their need/inquiry: "Tell me more about what you're looking for! I'm all ears."
-
-2. Answer questions about ${businessName}:
-   - Be helpful and provide information based on what the caller asks
-   - If you don't know specific details, say: "That's a great question! Let me take your information and have someone from our team get back to you with those details."
-   - Reference our business hours: ${businessHours}
-
-3. Offer to help schedule callbacks or appointments:
-   - "I'd love to get you scheduled! When works best for you this week?"
-   - Collect: preferred date/time, their timezone
-   - "How about Tuesday at 2pm, or would Thursday morning work better?"
-
-4. Handle inquiries professionally:
-   - Listen carefully to what they need
-   - Take detailed notes about their inquiry
-   - Always offer to have someone call them back if you can't answer
-   - Example: "I want to make sure you get the exact information you need. Can I have someone from ${businessName} give you a call back?"
-
-CONVERSATION STYLE:
-- Use natural filler words: "Absolutely!", "That's great!", "Oh, I'd love to help with that!"
-- Ask open-ended questions: "What else can I tell you?", "What would make this perfect for you?"
-- Acknowledge what they say: "That makes total sense!", "I hear you!", "Great question!"
-- Be persistent but friendly: Don't give up after one exchange - keep the conversation flowing
-- Mirror their energy: If they're excited, be excited. If they're calm, be warm and professional.
-
-LANGUAGE PROTOCOL:
-- ALWAYS speak in English by default
-- Only switch to another language if the caller EXPLICITLY asks: "Can you speak Spanish?", "Hablas español?", etc.
-- If unclear, ask: "Just to make sure I'm helping you in the best way - would you prefer to continue in English or another language?"
-
-WHAT NOT TO DO:
-- Don't rush to end the call
-- Don't be robotic or stiff
-- Don't just answer one question and ask if they need anything else
-- Don't switch languages unless explicitly requested
-- Don't say "Is there anything else I can help you with?" after every response
-- Don't mention that you're an AI unless directly asked
-- Don't provide specific business details you don't know - instead, offer a callback
-
-KEEP THE ENERGY UP! You're not just answering questions - you're representing ${businessName} and making a great first impression!`;
-
-  return baseInstructions;
+  let instructions = 'You are an energetic, friendly AI receptionist for ' + businessName + '.\n\n';
+  instructions += 'GREETING (Always start with this):\n';
+  instructions += '"Hi! Thanks so much for calling ' + businessName + '! How can I help you today?"\n\n';
+  instructions += 'BUSINESS INFORMATION:\n';
+  instructions += '- Business Name: ' + businessName + '\n';
+  instructions += '- Business Hours: ' + businessHours + '\n\n';
+  
+  if (customInstructions) {
+    instructions += 'CUSTOM BUSINESS INSTRUCTIONS:\n' + customInstructions + '\n\n';
+  }
+  
+  instructions += 'PERSONALITY:\n';
+  instructions += '- Be warm, upbeat, and enthusiastic! Use an energetic, conversational tone\n';
+  instructions += '- Smile through your voice - be genuinely excited to help\n';
+  instructions += '- Be patient and do not rush - let callers speak fully before responding\n';
+  instructions += '- Keep the conversation going naturally - do not be quick to end the call\n';
+  instructions += '- Ask follow-up questions to better understand their needs\n';
+  instructions += '- NEVER suggest ending the call unless the caller explicitly says goodbye or thanks you for your time\n';
+  instructions += '- Be helpful and knowledgeable about ' + businessName + '\n\n';
+  
+  instructions += 'YOUR RESPONSIBILITIES:\n';
+  instructions += '1. Capture lead information naturally through conversation:\n';
+  instructions += '   - Full name: "I would love to get your name for our records!"\n';
+  instructions += '   - Email address: "What is the best email to send you information?"\n';
+  instructions += '   - Phone number: "And what is a good callback number?" (if they do not volunteer it)\n';
+  instructions += '   - Their need/inquiry: "Tell me more about what you are looking for! I am all ears."\n\n';
+  
+  instructions += '2. Answer questions about ' + businessName + ':\n';
+  instructions += '   - Be helpful and provide information based on what the caller asks\n';
+  instructions += '   - If you do not know specific details, say: "That is a great question! Let me take your information and have someone from our team get back to you with those details."\n';
+  instructions += '   - Reference our business hours: ' + businessHours + '\n\n';
+  
+  instructions += '3. Offer to help schedule callbacks or appointments:\n';
+  instructions += '   - "I would love to get you scheduled! When works best for you this week?"\n';
+  instructions += '   - Collect: preferred date/time, their timezone\n';
+  instructions += '   - "How about Tuesday at 2pm, or would Thursday morning work better?"\n\n';
+  
+  instructions += '4. Handle inquiries professionally:\n';
+  instructions += '   - Listen carefully to what they need\n';
+  instructions += '   - Take detailed notes about their inquiry\n';
+  instructions += '   - Always offer to have someone call them back if you cannot answer\n';
+  instructions += '   - Example: "I want to make sure you get the exact information you need. Can I have someone from ' + businessName + ' give you a call back?"\n\n';
+  
+  instructions += 'CONVERSATION STYLE:\n';
+  instructions += '- Use natural filler words: "Absolutely!", "That is great!", "Oh, I would love to help with that!"\n';
+  instructions += '- Ask open-ended questions: "What else can I tell you?", "What would make this perfect for you?"\n';
+  instructions += '- Acknowledge what they say: "That makes total sense!", "I hear you!", "Great question!"\n';
+  instructions += '- Be persistent but friendly: Do not give up after one exchange - keep the conversation flowing\n';
+  instructions += '- Mirror their energy: If they are excited, be excited. If they are calm, be warm and professional.\n\n';
+  
+  instructions += 'LANGUAGE PROTOCOL:\n';
+  instructions += '- ALWAYS speak in English by default\n';
+  instructions += '- Only switch to another language if the caller EXPLICITLY asks: "Can you speak Spanish?", "Hablas español?", etc.\n';
+  instructions += '- If unclear, ask: "Just to make sure I am helping you in the best way - would you prefer to continue in English or another language?"\n\n';
+  
+  instructions += 'WHAT NOT TO DO:\n';
+  instructions += '- Do not rush to end the call\n';
+  instructions += '- Do not be robotic or stiff\n';
+  instructions += '- Do not just answer one question and ask if they need anything else\n';
+  instructions += '- Do not switch languages unless explicitly requested\n';
+  instructions += '- Do not say "Is there anything else I can help you with?" after every response\n';
+  instructions += '- Do not mention that you are an AI unless directly asked\n';
+  instructions += '- Do not provide specific business details you do not know - instead, offer a callback\n\n';
+  
+  instructions += 'KEEP THE ENERGY UP! You are not just answering questions - you are representing ' + businessName + ' and making a great first impression!';
+  
+  return instructions;
 }
 
-// Twilio webhook endpoint - handles incoming calls
 app.post('/incoming-call', async (req, res) => {
   console.log('📞 INCOMING CALL');
   
@@ -234,17 +211,16 @@ app.post('/incoming-call', async (req, res) => {
   const from = req.body.From;
   const to = req.body.To;
   
-  console.log(`   From: ${from}`);
-  console.log(`   To: ${to}`);
-  console.log(`   CallSid: ${callSid}`);
+  console.log('   From:', from);
+  console.log('   To:', to);
+  console.log('   CallSid:', callSid);
   
-  // Log call start to Supabase
   try {
-    const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/calls/bridge-log`, {
+    const response = await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/calls/bridge-log', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+        'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
       },
       body: JSON.stringify({
         toNumber: to,
@@ -266,23 +242,21 @@ app.post('/incoming-call', async (req, res) => {
     console.error('❌ Error logging call start:', sanitizeForLog(error));
   }
   
-  // TwiML response - connect to WebSocket
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Connect>
-    <Stream url="wss://${req.headers.host}/media-stream">
-      <Parameter name="callSid" value="${callSid}" />
-      <Parameter name="from" value="${from}" />
-      <Parameter name="to" value="${to}" />
-    </Stream>
-  </Connect>
-</Response>`;
+  const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<Response>\n' +
+    '  <Connect>\n' +
+    '    <Stream url="wss://' + req.headers.host + '/media-stream">\n' +
+    '      <Parameter name="callSid" value="' + callSid + '" />\n' +
+    '      <Parameter name="from" value="' + from + '" />\n' +
+    '      <Parameter name="to" value="' + to + '" />\n' +
+    '    </Stream>\n' +
+    '  </Connect>\n' +
+    '</Response>';
   
   res.type('text/xml');
   res.send(twiml);
 });
 
-// WebSocket handler for Twilio Media Streams
 wss.on('connection', async (ws, req) => {
   console.log('');
   console.log('═══════════════════════════════════════');
@@ -302,7 +276,6 @@ wss.on('connection', async (ws, req) => {
     appointmentRequested: false
   };
   
-  // Store session
   activeSessions.set(sessionId, {
     twilioWs: ws,
     openaiWs: null,
@@ -310,7 +283,6 @@ wss.on('connection', async (ws, req) => {
     startTime: callStartTime
   });
   
-  // Handle Twilio messages
   ws.on('message', async (message) => {
     try {
       const msg = JSON.parse(message.toString());
@@ -320,36 +292,31 @@ wss.on('connection', async (ws, req) => {
           streamSid = msg.start.streamSid;
           callSid = msg.start.callSid;
           
-          // Extract phone number from custom parameters
           const customParams = msg.start.customParameters;
           toPhoneNumber = customParams?.to || msg.start.to;
           
           console.log('📞 CALL STARTED');
-          console.log(`   CallSid: ${callSid}`);
-          console.log(`   StreamSid: ${streamSid}`);
-          console.log(`   To Phone: ${toPhoneNumber}`);
+          console.log('   CallSid:', callSid);
+          console.log('   StreamSid:', streamSid);
+          console.log('   To Phone:', toPhoneNumber);
           
-          // Update session
           const session = activeSessions.get(sessionId);
           if (session) {
             session.callSid = callSid;
           }
           
-          // ============= FETCH USER SETTINGS =============
           userSettings = await getUserSettingsByPhone(toPhoneNumber);
           
           if (!userSettings) {
             console.log('⚠️  WARNING: No settings found - using default');
             console.log('⚠️  AI will greet with "the business" instead of your business name');
-            console.log('⚠️  To fix: Ensure phone number in Settings matches exactly: ' + toPhoneNumber);
+            console.log('⚠️  To fix: Ensure phone number in Settings matches exactly:', toPhoneNumber);
           }
           
-          // Initialize OpenAI connection NOW with user-specific settings
           await initializeOpenAI(userSettings);
           break;
           
         case 'media':
-          // Forward audio from Twilio to OpenAI
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             const audioAppend = {
               type: 'input_audio_buffer.append',
@@ -363,7 +330,6 @@ wss.on('connection', async (ws, req) => {
           console.log('📞 CALL ENDED');
           await handleCallEnd(callSid, callStartTime, conversationContext, toPhoneNumber);
           
-          // Close OpenAI connection
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.close();
           }
@@ -374,14 +340,13 @@ wss.on('connection', async (ws, req) => {
     }
   });
   
-  // Initialize OpenAI with dynamic settings
   async function initializeOpenAI(settings) {
     try {
       console.log('🔗 Connecting to OpenAI Realtime API...');
       
       openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
         headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Authorization': 'Bearer ' + process.env.OPENAI_API_KEY,
           'OpenAI-Beta': 'realtime=v1'
         }
       });
@@ -389,12 +354,10 @@ wss.on('connection', async (ws, req) => {
       openaiWs.on('open', () => {
         console.log('✅ Connected to OpenAI Realtime API');
         
-        // Build dynamic instructions with user's business info
         const instructions = buildAIInstructions(settings);
         
         console.log('⚙️  Configuring OpenAI session...');
         
-        // Send session configuration
         openaiWs.send(JSON.stringify({
           type: 'session.update',
           session: {
@@ -418,7 +381,6 @@ wss.on('connection', async (ws, req) => {
         }));
       });
       
-      // Handle OpenAI responses
       openaiWs.on('message', async (data) => {
         try {
           const event = JSON.parse(data.toString());
@@ -431,15 +393,14 @@ wss.on('connection', async (ws, req) => {
             case 'session.updated':
               console.log('✅ OpenAI session configured');
               
-              // Trigger the AI to greet the caller
               const businessName = settings?.businessName || 'the business';
-              console.log(`🎤 Triggering greeting with business name: "${businessName}"`);
+              console.log('🎤 Triggering greeting with business name: "' + businessName + '"');
               
               openaiWs.send(JSON.stringify({
                 type: 'response.create',
                 response: {
                   modalities: ['text', 'audio'],
-                  instructions: `Greet the caller warmly with: "Hi! Thanks so much for calling ${businessName}! How can I help you today?"`
+                  instructions: 'Greet the caller warmly with: "Hi! Thanks so much for calling ' + businessName + '! How can I help you today?"'
                 }
               }));
               break;
@@ -492,7 +453,6 @@ wss.on('connection', async (ws, req) => {
         console.log('🔌 OpenAI WebSocket closed');
       });
       
-      // Update session
       const session = activeSessions.get(sessionId);
       if (session) {
         session.openaiWs = openaiWs;
@@ -519,18 +479,15 @@ wss.on('connection', async (ws, req) => {
   });
 });
 
-// Extract lead information from conversation
 function extractLeadInfo(transcript, context) {
   const text = transcript.toLowerCase();
   
-  // Email pattern
   const emailMatch = transcript.match(/[\w.-]+@[\w.-]+\.\w+/);
   if (emailMatch) {
     context.leadInfo.email = emailMatch[0];
     console.log('📧 Email captured:', emailMatch[0]);
   }
   
-  // Name pattern
   if (text.includes('my name is') || text.includes("i'm ")) {
     const nameMatch = transcript.match(/(?:my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
     if (nameMatch) {
@@ -539,21 +496,19 @@ function extractLeadInfo(transcript, context) {
     }
   }
   
-  // Appointment detection
   if (text.includes('appointment') || text.includes('booking') || text.includes('schedule')) {
     context.appointmentRequested = true;
     console.log('📅 Appointment requested');
   }
 }
 
-// Handle call end - log to Supabase
 async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
   const duration = Math.floor((Date.now() - startTime) / 1000);
   
   console.log('📊 CALL SUMMARY:');
-  console.log(`   Duration: ${duration}s`);
-  console.log(`   Lead Captured: ${!!context.leadInfo.name || !!context.leadInfo.email ? 'Yes' : 'No'}`);
-  console.log(`   Appointment Requested: ${context.appointmentRequested ? 'Yes' : 'No'}`);
+  console.log('   Duration:', duration + 's');
+  console.log('   Lead Captured:', (!!context.leadInfo.name || !!context.leadInfo.email ? 'Yes' : 'No'));
+  console.log('   Appointment Requested:', (context.appointmentRequested ? 'Yes' : 'No'));
   
   const callData = {
     callSid,
@@ -565,13 +520,12 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
     timestamp: new Date().toISOString()
   };
   
-  // Update call log in Supabase
   try {
-    await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/calls/${callSid}`, {
+    await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/calls/' + callSid, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+        'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
       },
       body: JSON.stringify({
         duration,
@@ -586,14 +540,13 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
     console.error('❌ Error updating call log:', sanitizeForLog(error));
   }
   
-  // Create lead if we have information
   if (context.leadInfo.name || context.leadInfo.email) {
     try {
-      await fetch(`${process.env.SUPABASE_URL}/functions/v1/make-server-4e1c9511/leads`, {
+      await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/leads', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+          'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
         },
         body: JSON.stringify({
           userId: 'system',
@@ -602,7 +555,7 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
           phone: context.leadInfo.phone || '',
           source: 'phone_call',
           status: 'new',
-          notes: `Captured from call ${callSid}. Appointment requested: ${context.appointmentRequested}`
+          notes: 'Captured from call ' + callSid + '. Appointment requested: ' + context.appointmentRequested
         })
       });
       
@@ -612,7 +565,6 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
     }
   }
   
-  // Trigger n8n webhook for post-call automation
   if (process.env.N8N_WEBHOOK_URL) {
     try {
       console.log('🔔 Triggering n8n webhook...');
@@ -649,17 +601,16 @@ async function handleCallEnd(callSid, startTime, context, toPhoneNumber) {
   }
 }
 
-// Start server
 server.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════════════════╗');
   console.log('║   🚀 Talkertive WebSocket Bridge Server         ║');
   console.log('╚══════════════════════════════════════════════════╝');
   console.log('');
-  console.log(`📡 Server running on port ${PORT}`);
-  console.log(`🔗 WebSocket: ws://localhost:${PORT}/media-stream`);
-  console.log(`📞 Webhook: http://localhost:${PORT}/incoming-call`);
-  console.log(`❤️  Health: http://localhost:${PORT}/health`);
+  console.log('📡 Server running on port ' + PORT);
+  console.log('🔗 WebSocket: ws://localhost:' + PORT + '/media-stream');
+  console.log('📞 Webhook: http://localhost:' + PORT + '/incoming-call');
+  console.log('❤️  Health: http://localhost:' + PORT + '/health');
   console.log('');
   console.log('Environment:');
   console.log('  ✅ OpenAI:', process.env.OPENAI_API_KEY ? 'Configured' : '❌ Missing');
@@ -671,7 +622,6 @@ server.listen(PORT, () => {
   console.log('');
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM received, shutting down gracefully...');
   server.close(() => {
