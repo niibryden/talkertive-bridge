@@ -2,7 +2,6 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import OpenAI from 'openai';
-import { ElevenLabsClient } from 'elevenlabs';
 import twilio from 'twilio';
 import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
@@ -51,7 +50,6 @@ console.log('');
 
 const requiredEnvVars = [
   'OPENAI_API_KEY',
-  'ELEVENLABS_API_KEY',
   'TWILIO_ACCOUNT_SID',
   'TWILIO_AUTH_TOKEN',
   'SUPABASE_URL',
@@ -67,7 +65,6 @@ requiredEnvVars.forEach(varName => {
 console.log('');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
@@ -175,7 +172,6 @@ wss.on('connection', async (ws, req) => {
   let toPhoneNumber = null;
   let fromPhoneNumber = null;
   let userSettings = null;
-  let useElevenLabs = true; // Toggle for ElevenLabs
   
   ws.on('message', async (message) => {
     try {
@@ -191,7 +187,6 @@ wss.on('connection', async (ws, req) => {
           fromPhoneNumber = customParams?.from || msg.start.from;
           
           console.log('📞 CALL STARTED');
-          console.log('   StreamSid:', streamSid);
           console.log('   To Phone:', toPhoneNumber);
           
           userSettings = await getUserSettingsByPhone(toPhoneNumber);
@@ -218,44 +213,6 @@ wss.on('connection', async (ws, req) => {
   });
   
   async function initializeOpenAI(settings) {
-    // ElevenLabs TTS function using SDK with proper streaming
-    async function speakWithElevenLabs(text) {
-      if (!text || text.trim() === '') return;
-      
-      try {
-        console.log('🎤 ElevenLabs speaking:', text.substring(0, 60) + '...');
-        
-        const audioStream = await elevenlabs.textToSpeech.convertAsStream(
-          'nJvj5shg2xu1GKGxqfkE',
-          {
-            text: text,
-            model_id: 'eleven_turbo_v2_5',
-            output_format: 'ulaw_8000'
-          }
-        );
-        
-        // Stream audio chunks to Twilio
-        for await (const chunk of audioStream) {
-          if (ws.readyState === WebSocket.OPEN) {
-            const base64Audio = Buffer.from(chunk).toString('base64');
-            ws.send(JSON.stringify({
-              event: 'media',
-              streamSid: streamSid,
-              media: {
-                payload: base64Audio
-              }
-            }));
-          }
-        }
-        
-        console.log('✅ ElevenLabs speech complete');
-      } catch (error) {
-        console.error('❌ ElevenLabs error:', sanitizeForLog(error));
-        console.log('⚠️  Falling back to OpenAI voice');
-        useElevenLabs = false;
-      }
-    }
-    
     try {
       console.log('🔗 Connecting to OpenAI...');
       
@@ -270,8 +227,6 @@ wss.on('connection', async (ws, req) => {
         console.log('✅ Connected to OpenAI');
         
         const instructions = buildAIInstructions(settings);
-        
-        console.log('🎤 Voice: ElevenLabs (nJvj5shg2xu1GKGxqfkE)');
         
         openaiWs.send(JSON.stringify({
           type: 'session.update',
@@ -303,27 +258,20 @@ wss.on('connection', async (ws, req) => {
           }
           
           if (event.type === 'response.audio.delta' && event.delta) {
-            // If ElevenLabs fails, use OpenAI audio as fallback
-            if (!useElevenLabs) {
-              const audioPayload = {
-                event: 'media',
-                streamSid: streamSid,
-                media: { payload: event.delta }
-              };
-              ws.send(JSON.stringify(audioPayload));
-            }
-          }
-          
-          // Get the transcript and send to ElevenLabs
-          if (event.type === 'response.audio_transcript.done') {
-            console.log('🤖 AI:', event.transcript);
-            if (useElevenLabs) {
-              await speakWithElevenLabs(event.transcript);
-            }
+            const audioPayload = {
+              event: 'media',
+              streamSid: streamSid,
+              media: { payload: event.delta }
+            };
+            ws.send(JSON.stringify(audioPayload));
           }
           
           if (event.type === 'conversation.item.input_audio_transcription.completed') {
             console.log('👤 User:', event.transcript);
+          }
+          
+          if (event.type === 'response.audio_transcript.done') {
+            console.log('🤖 AI:', event.transcript);
           }
           
         } catch (error) {
@@ -350,7 +298,7 @@ server.listen(PORT, () => {
   console.log('');
   console.log('🚀 Talkertive WebSocket Bridge Server');
   console.log('📡 Port:', PORT);
-  console.log('🎤 Voice: ElevenLabs (nJvj5shg2xu1GKGxqfkE)');
+  console.log('🎤 Voice: OpenAI Alloy (ElevenLabs coming soon)');
   console.log('');
 });
 
