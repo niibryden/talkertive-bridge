@@ -276,7 +276,8 @@ wss.on('connection', async (ws, req) => {
   let conversationContext = {
     messages: [],
     leadInfo: {},
-    appointmentRequested: false
+    appointmentRequested: false,
+    currentResponse: ''
   };
   
   activeSessions.set(sessionId, {
@@ -346,6 +347,43 @@ wss.on('connection', async (ws, req) => {
   });
   
   async function initializeOpenAI(settings) {
+    // ElevenLabs speech synthesis function
+    async function speakWithElevenLabs(text) {
+      if (!text || text.trim() === '') return;
+      
+      try {
+        console.log('🎤 ElevenLabs speaking:', text.substring(0, 50) + '...');
+        
+        const audioStream = await elevenlabs.textToSpeech.convertAsStream(
+          'nJvj5shg2xu1GKGxqfkE',  // Voice ID
+          {
+            text: text,
+            model_id: 'eleven_multilingual_v2',
+            output_format: 'ulaw_8000'  // Match Twilio format
+          }
+        );
+        
+        // Stream audio chunks to Twilio
+        for await (const chunk of audioStream) {
+          if (ws.readyState === ws.OPEN) {
+            const base64Audio = Buffer.from(chunk).toString('base64');
+            const audioPayload = {
+              event: 'media',
+              streamSid: streamSid,
+              media: {
+                payload: base64Audio
+              }
+            };
+            ws.send(JSON.stringify(audioPayload));
+          }
+        }
+        
+        console.log('✅ ElevenLabs speech complete');
+      } catch (error) {
+        console.error('❌ ElevenLabs error:', sanitizeForLog(error));
+      }
+    }
+    
     try {
       console.log('🔗 Connecting to OpenAI Realtime API...');
       
@@ -362,15 +400,14 @@ wss.on('connection', async (ws, req) => {
         const instructions = buildAIInstructions(settings);
         
         console.log('⚙️  Configuring OpenAI session...');
+        console.log('🎤 Voice Mode: ElevenLabs (nJvj5shg2xu1GKGxqfkE)');
         
         openaiWs.send(JSON.stringify({
           type: 'session.update',
           session: {
-            modalities: ['text', 'audio'],
+            modalities: ['text'],  // TEXT ONLY - no audio from OpenAI
             instructions: instructions,
-            voice: 'shimmer',
             input_audio_format: 'g711_ulaw',
-            output_audio_format: 'g711_ulaw',
             input_audio_transcription: {
               model: 'whisper-1'
             },
@@ -401,13 +438,9 @@ wss.on('connection', async (ws, req) => {
               const businessName = settings?.businessName || 'the business';
               console.log('🎤 Triggering greeting with business name: "' + businessName + '"');
               
-              openaiWs.send(JSON.stringify({
-                type: 'response.create',
-                response: {
-                  modalities: ['text', 'audio'],
-                  instructions: 'Greet the caller warmly with: "Hi! Thanks so much for calling ' + businessName + '! How can I help you today?"'
-                }
-              }));
+              // Send greeting as TEXT to be spoken by ElevenLabs
+              const greetingText = `Hi! Thanks so much for calling ${businessName}! How can I help you today?`;
+              await speakWithElevenLabs(greetingText);
               break;
               
             case 'conversation.item.created':
@@ -419,26 +452,29 @@ wss.on('connection', async (ws, req) => {
               }
               break;
               
-            case 'response.audio.delta':
-              if (event.delta && ws.readyState === ws.OPEN) {
-                const audioPayload = {
-                  event: 'media',
-                  streamSid: streamSid,
-                  media: {
-                    payload: event.delta
-                  }
-                };
-                ws.send(JSON.stringify(audioPayload));
-              }
-              break;
-              
-            case 'response.audio_transcript.delta':
-              console.log('🤖 AI:', event.delta);
-              break;
-              
             case 'conversation.item.input_audio_transcription.completed':
               console.log('👤 User:', event.transcript);
               extractLeadInfo(event.transcript, conversationContext);
+              break;
+              
+            case 'response.text.delta':
+              // Accumulate text chunks
+              if (!conversationContext.currentResponse) {
+                conversationContext.currentResponse = '';
+              }
+              conversationContext.currentResponse += event.delta;
+              break;
+              
+            case 'response.text.done':
+              // Full text response received from OpenAI
+              const fullText = conversationContext.currentResponse || event.text;
+              console.log('🤖 AI Response:', fullText);
+              
+              // Send to ElevenLabs for speech synthesis
+              await speakWithElevenLabs(fullText);
+              
+              // Clear the accumulated response
+              conversationContext.currentResponse = '';
               break;
               
             case 'error':
