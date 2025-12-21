@@ -176,6 +176,14 @@ function buildAIInstructions(userSettings) {
   instructions += '- Call book_appointment with all the details\n';
   instructions += '- Confirm: "Perfect! I\'ve got you scheduled for [date/time]. You\'ll receive a confirmation email shortly!"\n\n';
   
+  instructions += 'ORDER STATUS LOOKUP (Use the lookup_order_status function when customers ask about their order):\n';
+  instructions += '- Listen for phrases like: "Where\'s my order?", "Order status", "Track my order", "Check on order #12345"\n';
+  instructions += '- Ask for the order number: "Sure! What\'s your order number? It should start with ORD or just be numbers."\n';
+  instructions += '- Call lookup_order_status with the order ID they provide\n';
+  instructions += '- If found: Read the status naturally - "Great news! Your order is [status]. [additional info]"\n';
+  instructions += '- If not found: "Hmm, I couldn\'t find that order. Could you double-check the number? Or I can have someone call you back to help!"\n';
+  instructions += '- Always be empathetic and helpful with order inquiries\n\n';
+  
   instructions += 'REMEMBER: You\'re Krystle - a REAL person having a REAL conversation. Be warm, natural, and helpful!\n';
   
   return instructions;
@@ -247,6 +255,21 @@ const FUNCTION_TOOLS = [
         }
       },
       required: ['customerName', 'dateTime', 'purpose']
+    }
+  },
+  {
+    type: 'function',
+    name: 'lookup_order_status',
+    description: 'Look up the status of a customer\'s order when they provide an order ID. Call this when the customer asks about their order status, tracking, or delivery information.',
+    parameters: {
+      type: 'object',
+      properties: {
+        orderId: {
+          type: 'string',
+          description: 'The order ID provided by the customer (e.g., ORD-12345, #12345, or 12345)'
+        }
+      },
+      required: ['orderId']
     }
   }
 ];
@@ -498,6 +521,75 @@ wss.on('connection', async (ws, req) => {
       });
     }
     
+    if (functionName === 'lookup_order_status') {
+      console.log('📦 LOOKING UP ORDER STATUS');
+      console.log('Order ID:', functionArgs.orderId);
+      
+      // Clean up order ID (remove #, spaces, etc.)
+      let cleanOrderId = functionArgs.orderId.toString().trim().toUpperCase();
+      cleanOrderId = cleanOrderId.replace(/^#/, ''); // Remove leading #
+      
+      try {
+        const response = await fetch(process.env.SUPABASE_URL + '/functions/v1/make-server-4e1c9511/orders/lookup/' + encodeURIComponent(cleanOrderId), {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
+          }
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('✅ Order found:', sanitizeForLog(result.order));
+          
+          const order = result.order;
+          
+          // Format response for AI to speak naturally
+          let statusMessage = `I found your order! `;
+          statusMessage += `Order ${order.orderId} `;
+          
+          if (order.customerName) {
+            statusMessage += `for ${order.customerName} `;
+          }
+          
+          statusMessage += `is currently ${order.status}. `;
+          
+          if (order.statusMessage) {
+            statusMessage += `${order.statusMessage}. `;
+          }
+          
+          if (order.estimatedDelivery) {
+            statusMessage += `Your estimated delivery date is ${order.estimatedDelivery}. `;
+          }
+          
+          if (order.trackingNumber) {
+            statusMessage += `Your tracking number is ${order.trackingNumber}. `;
+          }
+          
+          if (order.items && order.items.length > 0) {
+            statusMessage += `This order includes: ${order.items.join(', ')}. `;
+          }
+          
+          return JSON.stringify({
+            success: true,
+            message: statusMessage,
+            order: order
+          });
+        } else {
+          console.log('❌ Order not found');
+          return JSON.stringify({
+            success: false,
+            message: `I couldn't find an order with ID ${cleanOrderId}. Could you please double-check the order number? It should be something like ORD-12345.`
+          });
+        }
+      } catch (err) {
+        console.error('⚠️ Failed to lookup order:', err.message);
+        return JSON.stringify({
+          success: false,
+          message: 'I\'m having trouble looking up that order right now. Could you try again in a moment?'
+        });
+      }
+    }
+    
     return JSON.stringify({ success: false, message: 'Unknown function' });
   }
   
@@ -518,7 +610,7 @@ wss.on('connection', async (ws, req) => {
         const instructions = buildAIInstructions(settings);
         
         console.log('🎤 Voice: Shimmer (Krystle)');
-        console.log('🔧 Tools: capture_lead_info, book_appointment');
+        console.log('🔧 Tools: capture_lead_info, book_appointment, lookup_order_status');
         
         openaiWs.send(JSON.stringify({
           type: 'session.update',
