@@ -246,6 +246,10 @@ function buildAIInstructions(userSettings) {
   instructions += '- After capturing their info, let them know they\'ll receive a text confirmation\n\n';
   
   instructions += 'APPOINTMENT BOOKING (Use the book_appointment function when they want to schedule):\n';
+  instructions += '- Only accept appointments within the next 14 days (2 weeks) from today\n';
+  instructions += '- Today is: ' + new Date().toISOString().split('T')[0] + '\n';
+  instructions += '- Maximum booking date: ' + new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] + '\n';
+  instructions += '- If customer requests a date beyond 2 weeks, politely say: "I can schedule appointments within the next two weeks. Would you like to pick a date within that timeframe?"\n';
   instructions += '- Ask for preferred date and time naturally\n';
   instructions += '- Get their name, phone, and email if you don\'t have it yet\n';
   instructions += '- Call book_appointment with all the details\n';
