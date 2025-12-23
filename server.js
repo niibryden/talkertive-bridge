@@ -269,7 +269,7 @@ const FUNCTION_TOOLS = [
   {
     type: 'function',
     name: 'capture_lead_info',
-    description: 'Capture customer information in real-time during the conversation. Call this IMMEDIATELY when you learn new info about the customer, don\'t wait until the end of the call. The customer will receive a text confirmation.',
+    description: 'Capture customer information in real-time during the conversation. Call this IMMEDIATELY when you learn new info about the customer, don\\\'t wait until the end of the call. IMPORTANT: You must ask for SMS consent before capturing contact info - say "Can I send you updates via text message?" and wait for their yes/no response. The customer will receive a text confirmation ONLY if they consent.',
     parameters: {
       type: 'object',
       properties: {
@@ -288,6 +288,10 @@ const FUNCTION_TOOLS = [
         notes: {
           type: 'string',
           description: 'Any important notes about what the customer needs or is asking about'
+        },
+        smsConsent: {
+          type: 'boolean',
+          description: 'Whether customer consented to receive SMS messages. You MUST ask "Can I send you updates via text message?" before setting this. true = they said yes, false = they said no or didn\'t respond'
         }
       },
       required: []
@@ -296,7 +300,7 @@ const FUNCTION_TOOLS = [
   {
     type: 'function',
     name: 'book_appointment',
-    description: 'Book an appointment for the customer. Call this when the customer wants to schedule a time to meet or have a service. The customer will receive a text and email confirmation.',
+    description: 'Book an appointment for the customer. Call this when the customer wants to schedule a time to meet or have a service. IMPORTANT: Before booking, ask "Can I send you a confirmation text?" to get SMS consent. The customer will receive text and email confirmation.',
     parameters: {
       type: 'object',
       properties: {
@@ -311,6 +315,10 @@ const FUNCTION_TOOLS = [
         customerPhone: {
           type: 'string',
           description: 'Customer\'s phone number'
+        },
+        smsConsent: {
+          type: 'boolean',
+          description: 'Whether customer agreed to receive SMS notifications. Ask: "Can I send you a confirmation text?" before booking. true = yes, false = no'
         },
         dateTime: {
           type: 'string',
@@ -392,7 +400,8 @@ wss.on('connection', async (ws, req) => {
     name: null,
     email: null,
     phone: null,
-    notes: null
+    notes: null,
+    smsConsent: false
   };
   
   // Track appointment info
@@ -548,6 +557,7 @@ wss.on('connection', async (ws, req) => {
           ? capturedLeadInfo.notes + '\n' + functionArgs.notes
           : functionArgs.notes;
       }
+      if (functionArgs.smsConsent !== undefined) capturedLeadInfo.smsConsent = functionArgs.smsConsent;
       
       console.log('💾 Updated lead info:', sanitizeForLog(capturedLeadInfo));
       
@@ -556,7 +566,7 @@ wss.on('connection', async (ws, req) => {
       const customerName = capturedLeadInfo.name || 'there';
       const businessName = userSettings?.businessName || 'us';
       
-      if (customerPhone) {
+      if (customerPhone && capturedLeadInfo.smsConsent) {
         const smsMessage = `Hi ${customerName}! Thanks for calling ${businessName}. We've got your information and will follow up with you shortly. - Talkertive.io`;
         await sendSMS(customerPhone, smsMessage);
       }
@@ -607,7 +617,7 @@ wss.on('connection', async (ws, req) => {
       const customerPhone = functionArgs.customerPhone || capturedLeadInfo.phone || fromPhoneNumber;
       
       // ============= NEW: Send SMS Confirmation for Appointment =============
-      if (customerPhone) {
+      if (customerPhone && functionArgs.smsConsent) {
         const businessName = userSettings?.businessName || 'us';
         // Format date nicely (you might want to use a date library for better formatting)
         const appointmentTime = new Date(functionArgs.dateTime).toLocaleString('en-US', {
