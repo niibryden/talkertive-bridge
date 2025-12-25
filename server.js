@@ -813,21 +813,15 @@ wss.on('connection', async (ws, req) => {
             input_audio_transcription: { model: 'whisper-1' },
             turn_detection: {
               type: 'server_vad',
-              threshold: 0.3,  // ✅ FIXED: Reduced from 0.5 to 0.3 (less sensitive, won't cut off AI)
-              prefix_padding_ms: 500,  // ✅ FIXED: Increased from 300 to 500 (captures more of user speech)
-              silence_duration_ms: 1200  // ✅ FIXED: Increased from 800 to 1200 (AI won't interrupt itself)
+              threshold: 0.3,  // ✅ Less sensitive - won't cut off AI
+              prefix_padding_ms: 500,  // ✅ Captures more of user speech
+              silence_duration_ms: 1200  // ✅ AI won't interrupt itself
             },
             temperature: 1.0,
             max_response_output_tokens: 150,
             tools: FUNCTION_TOOLS
           }
         }));
-        
-        // ✅ FIXED: Trigger greeting IMMEDIATELY after connection (no waiting)
-        console.log('🎤 Triggering immediate greeting...');
-        setTimeout(() => {
-          openaiWs.send(JSON.stringify({ type: 'response.create' }));
-        }, 100);  // Small 100ms delay to ensure session is fully configured
       });
       
       openaiWs.on('message', async (data) => {
