@@ -111,7 +111,7 @@ async function getUserSettingsByPhone(phoneNumber) {
       const data = await response.json();
       console.log('✅ SUCCESS - Settings found!');
       console.log('📋 Business Name:', data.settings?.businessName || '(not set)');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━���━━');
       return data.settings || null;
     } else {
       console.log('❌ FAILED - No settings found');
@@ -169,9 +169,11 @@ async function triggerN8nWebhook(eventType, data) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        eventType,
-        timestamp: new Date().toISOString(),
-        ...data
+        body: {  // ✅ FIXED: Wrap in "body" object for n8n
+          event: eventType,
+          timestamp: new Date().toISOString(),
+          ...data
+        }
       })
     });
     
@@ -181,8 +183,9 @@ async function triggerN8nWebhook(eventType, data) {
       console.log('📨 Response:', result);
       return { success: true, response: result };
     } else {
-      console.error('❌ n8n webhook failed:', response.status, await response.text());
-      return { success: false, status: response.status };
+      const errorText = await response.text();
+      console.error('❌ n8n webhook failed:', response.status, errorText);
+      return { success: false, status: response.status, error: errorText };
     }
   } catch (error) {
     console.error('❌ n8n webhook error:', error.message);
@@ -487,15 +490,29 @@ wss.on('connection', async (ws, req) => {
             };
             
             if (appointmentBooked && appointmentDetails) {
+              // ✅ FIXED: Convert dateTime to proper ISO format and use correct field names
+              const appointmentDate = new Date(appointmentDetails.dateTime).toISOString();
+              const appointmentDateTime = new Date(appointmentDetails.dateTime).toLocaleString('en-US', {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                timeZone: appointmentDetails.timeZone || 'America/New_York'
+              });
+              
               // Send appointment webhook
               await triggerN8nWebhook('appointment_booked', {
                 ...webhookData,
                 customerName: appointmentDetails.customerName || capturedLeadInfo.name,
                 customerEmail: appointmentDetails.customerEmail || capturedLeadInfo.email,
                 customerPhone: appointmentDetails.customerPhone || capturedLeadInfo.phone || fromPhoneNumber,
-                appointmentDateTime: appointmentDetails.dateTime,
+                appointmentDate: appointmentDate,  // ✅ ISO timestamp for calendar operations
+                appointmentDateTime: appointmentDateTime,  // ✅ Human-readable for display
                 duration: appointmentDetails.duration || 30,
-                purpose: appointmentDetails.purpose
+                purpose: appointmentDetails.purpose,
+                timeZone: appointmentDetails.timeZone || 'America/New_York'
               });
             } else if (hasLeadInfo) {
               // Send lead captured webhook
