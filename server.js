@@ -86,8 +86,8 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     service: 'talkertive-websocket-bridge',
-    version: '2.1.0',
-    features: ['sms', 'n8n-webhook', 'order-lookup', 'real-time-lead-capture'],
+    version: '2.2.0',
+    features: ['sms', 'n8n-webhook', 'order-lookup', 'real-time-lead-capture', 'appointment-booking'],
     activeSessions: activeSessions.size,
     timestamp: new Date().toISOString()
   });
@@ -111,7 +111,7 @@ async function getUserSettingsByPhone(phoneNumber) {
       const data = await response.json();
       console.log('✅ SUCCESS - Settings found!');
       console.log('📋 Business Name:', data.settings?.businessName || '(not set)');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       return data.settings || null;
     } else {
       console.log('❌ FAILED - No settings found');
@@ -151,7 +151,7 @@ async function sendSMS(toNumber, message) {
   }
 }
 
-// ============= NEW: n8n Webhook Helper Function =============
+// ============= FIXED: n8n Webhook Helper Function with Double-Nested Body =============
 async function triggerN8nWebhook(eventType, data) {
   if (!process.env.N8N_WEBHOOK_URL) {
     console.log('⚠️ n8n webhook not triggered - N8N_WEBHOOK_URL not configured');
@@ -163,18 +163,25 @@ async function triggerN8nWebhook(eventType, data) {
     console.log('   Event Type:', eventType);
     console.log('   Data:', sanitizeForLog(data));
     
+    // ✅ FIXED: Double-nested body structure for n8n to access via $json.body.body.event
+    const payload = {
+      body: {
+        body: {
+          event: eventType,
+          timestamp: new Date().toISOString(),
+          ...data
+        }
+      }
+    };
+    
+    console.log('📦 Sending payload:', sanitizeForLog(payload));
+    
     const response = await fetch(process.env.N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        body: {  // ✅ FIXED: Wrap in "body" object for n8n
-          event: eventType,
-          timestamp: new Date().toISOString(),
-          ...data
-        }
-      })
+      body: JSON.stringify(payload)
     });
     
     if (response.ok) {
@@ -245,8 +252,9 @@ function buildAIInstructions(userSettings) {
   instructions += '- When they give you their name → call capture_lead_info with name\n';
   instructions += '- When they give you their email → call capture_lead_info with email\n';
   instructions += '- When they tell you what they need → call capture_lead_info with notes\n';
+  instructions += '- IMPORTANT: Ask for SMS consent: "Can I send you updates via text message?"\n';
   instructions += '- Call the function IMMEDIATELY when you get new info, don\'t wait until end of call\n';
-  instructions += '- After capturing their info, let them know they\'ll receive a text confirmation\n\n';
+  instructions += '- After capturing info, confirm: "Perfect! You\'ll receive a confirmation shortly."\n\n';
   
   instructions += 'APPOINTMENT BOOKING (Use the book_appointment function when they want to schedule):\n';
   instructions += '- Only accept appointments within the next 14 days (2 weeks) from today\n';
@@ -255,8 +263,9 @@ function buildAIInstructions(userSettings) {
   instructions += '- If customer requests a date beyond 2 weeks, politely say: "I can schedule appointments within the next two weeks. Would you like to pick a date within that timeframe?"\n';
   instructions += '- Ask for preferred date and time naturally\n';
   instructions += '- Get their name, phone, and email if you don\'t have it yet\n';
+  instructions += '- IMPORTANT: Ask "Can I send you a confirmation text?" to get SMS consent\n';
   instructions += '- Call book_appointment with all the details\n';
-  instructions += '- Confirm: "Perfect! I\'ve got you scheduled for [date/time]. You\'ll receive a confirmation text and email shortly!"\n\n';
+  instructions += '- Confirm: "Perfect! I\'ve got you scheduled for [date/time]. You\'ll receive a confirmation shortly!"\n\n';
   
   instructions += 'ORDER STATUS LOOKUP (Use the lookup_order_status function when customers ask about their order):\n';
   instructions += '- Listen for phrases like: "Where\'s my order?", "Order status", "Track my order", "Check on order #12345"\n';
@@ -276,7 +285,7 @@ const FUNCTION_TOOLS = [
   {
     type: 'function',
     name: 'capture_lead_info',
-    description: 'Capture customer information in real-time during the conversation. Call this IMMEDIATELY when you learn new info about the customer, don\\\'t wait until the end of the call. IMPORTANT: You must ask for SMS consent before capturing contact info - say "Can I send you updates via text message?" and wait for their yes/no response. The customer will receive a text confirmation ONLY if they consent.',
+    description: 'Capture customer information in real-time during the conversation. Call this IMMEDIATELY when you learn new info about the customer, don\'t wait until the end of the call. IMPORTANT: You must ask for SMS consent before capturing contact info - say "Can I send you updates via text message?" and wait for their yes/no response.',
     parameters: {
       type: 'object',
       properties: {
@@ -307,7 +316,7 @@ const FUNCTION_TOOLS = [
   {
     type: 'function',
     name: 'book_appointment',
-    description: 'Book an appointment for the customer. Call this when the customer wants to schedule a time to meet or have a service. IMPORTANT: Before booking, ask "Can I send you a confirmation text?" to get SMS consent. The customer will receive text and email confirmation.',
+    description: 'Book an appointment for the customer. Call this when the customer wants to schedule a time to meet or have a service. IMPORTANT: Before booking, ask "Can I send you a confirmation text?" to get SMS consent.',
     parameters: {
       type: 'object',
       properties: {
@@ -402,6 +411,9 @@ wss.on('connection', async (ws, req) => {
   let userId = null;
   let callStartTime = new Date();
   
+  // ✅ NEW: Webhook deduplication flag
+  let webhookSent = false;
+  
   // Track captured lead info
   let capturedLeadInfo = {
     name: null,
@@ -474,10 +486,17 @@ wss.on('connection', async (ws, req) => {
         case 'stop':
           console.log('📞 CALL ENDED');
           
+          // ✅ FIXED: Prevent duplicate webhook sends
+          if (webhookSent) {
+            console.log('⚠️ Webhook already sent for this call - skipping duplicate');
+            break;
+          }
+          webhookSent = true;
+          
           // Calculate duration
           const duration = Math.floor((new Date() - callStartTime) / 1000);
           
-          // ============= NEW: Trigger n8n Webhook After Call =============
+          // ============= FIXED: n8n Webhook with All Required Fields =============
           const hasLeadInfo = !!(capturedLeadInfo.name || capturedLeadInfo.email);
           
           if (hasLeadInfo || appointmentBooked) {
@@ -486,52 +505,51 @@ wss.on('connection', async (ws, req) => {
               fromNumber: fromPhoneNumber,
               toNumber: toPhoneNumber,
               duration,
-              businessName: userSettings?.businessName || 'Unknown'
+              businessName: userSettings?.businessName || 'Unknown',
+              status: 'completed'
             };
             
             if (appointmentBooked && appointmentDetails) {
-              // ✅ FIXED: Convert dateTime to proper ISO format and use correct field names
-              const appointmentDate = new Date(appointmentDetails.dateTime).toISOString();
-              const appointmentDateTime = new Date(appointmentDetails.dateTime).toLocaleString('en-US', {
-                weekday: 'long',
-                month: 'long',
-                day: 'numeric',
-                year: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-                timeZone: appointmentDetails.timeZone || 'America/New_York'
-              });
+              // ✅ FIXED: Send appointment webhook with all required fields
+              const appointmentDateTime = new Date(appointmentDetails.dateTime).toISOString();
               
-              // Send appointment webhook
               await triggerN8nWebhook('appointment_booked', {
                 ...webhookData,
                 customerName: appointmentDetails.customerName || capturedLeadInfo.name,
-                customerEmail: appointmentDetails.customerEmail || capturedLeadInfo.email,
+                customerEmail: appointmentDetails.customerEmail || capturedLeadInfo.email || '',
                 customerPhone: appointmentDetails.customerPhone || capturedLeadInfo.phone || fromPhoneNumber,
-                appointmentDate: appointmentDate,  // ✅ ISO timestamp for calendar operations
-                appointmentDateTime: appointmentDateTime,  // ✅ Human-readable for display
+                appointmentDateTime: appointmentDateTime,  // ✅ ISO format for Google Calendar
+                smsConsent: appointmentDetails.smsConsent || false,  // ✅ Required for SMS consent check
                 duration: appointmentDetails.duration || 30,
                 purpose: appointmentDetails.purpose,
-                timeZone: appointmentDetails.timeZone || 'America/New_York'
+                timeZone: appointmentDetails.timeZone || 'America/New_York',
+                appointmentBooked: true,
+                leadCaptured: hasLeadInfo
               });
             } else if (hasLeadInfo) {
-              // Send lead captured webhook
+              // ✅ FIXED: Send lead captured webhook with all required fields
               await triggerN8nWebhook('lead_captured', {
                 ...webhookData,
                 customerName: capturedLeadInfo.name || 'Unknown',
                 customerEmail: capturedLeadInfo.email || '',
                 customerPhone: capturedLeadInfo.phone || fromPhoneNumber,
-                summary: capturedLeadInfo.notes || 'No summary provided'
+                summary: capturedLeadInfo.notes || 'No summary provided',
+                smsConsent: capturedLeadInfo.smsConsent || false,  // ✅ SMS consent included
+                appointmentBooked: false,
+                leadCaptured: true
               });
             }
           } else {
-            // Call completed without lead capture
+            // Call completed without lead capture or appointment
             await triggerN8nWebhook('call_completed', {
               callSid,
               fromNumber: fromPhoneNumber,
               toNumber: toPhoneNumber,
               duration,
-              businessName: userSettings?.businessName || 'Unknown'
+              businessName: userSettings?.businessName || 'Unknown',
+              status: 'completed',
+              appointmentBooked: false,
+              leadCaptured: false
             });
           }
           
@@ -582,7 +600,7 @@ wss.on('connection', async (ws, req) => {
       
       console.log('💾 Updated lead info:', sanitizeForLog(capturedLeadInfo));
       
-      // ============= NEW: Send SMS Confirmation =============
+      // ============= SMS Confirmation =============
       const customerPhone = capturedLeadInfo.phone || fromPhoneNumber;
       const customerName = capturedLeadInfo.name || 'there';
       const businessName = userSettings?.businessName || 'us';
@@ -623,7 +641,7 @@ wss.on('connection', async (ws, req) => {
       
       return JSON.stringify({ 
         success: true, 
-        message: 'Lead information captured successfully. A confirmation text has been sent.' 
+        message: 'Lead information captured successfully.' + (capturedLeadInfo.smsConsent ? ' A confirmation text has been sent.' : '')
       });
     }
     
@@ -637,10 +655,9 @@ wss.on('connection', async (ws, req) => {
       const customerEmail = functionArgs.customerEmail || capturedLeadInfo.email;
       const customerPhone = functionArgs.customerPhone || capturedLeadInfo.phone || fromPhoneNumber;
       
-      // ============= NEW: Send SMS Confirmation for Appointment =============
+      // ============= SMS Confirmation for Appointment =============
       if (customerPhone && functionArgs.smsConsent) {
         const businessName = userSettings?.businessName || 'us';
-        // Format date nicely (you might want to use a date library for better formatting)
         const appointmentTime = new Date(functionArgs.dateTime).toLocaleString('en-US', {
           weekday: 'short',
           month: 'short',
@@ -683,7 +700,7 @@ wss.on('connection', async (ws, req) => {
             
             return JSON.stringify({ 
               success: true, 
-              message: 'Appointment booked successfully. You\'ll receive a confirmation text and email shortly.',
+              message: 'Appointment booked successfully. You\'ll receive a confirmation shortly.',
               appointmentId: result.appointment?.id,
               calendarEventCreated: result.calendarEventCreated
             });
@@ -815,10 +832,10 @@ wss.on('connection', async (ws, req) => {
               type: 'server_vad',
               threshold: 0.5,
               prefix_padding_ms: 300,
-              silence_duration_ms: 1500  // ✅ INCREASED from 800ms to prevent truncation
+              silence_duration_ms: 1500
             },
             temperature: 1.0,
-            max_response_output_tokens: 800,  // ✅ INCREASED from 150 to allow full responses
+            max_response_output_tokens: 800,
             tools: FUNCTION_TOOLS
           }
         }));
@@ -828,18 +845,8 @@ wss.on('connection', async (ws, req) => {
         try {
           const event = JSON.parse(data.toString());
           
-          // ✅ LOG ALL EVENTS for debugging (except audio deltas to avoid spam)
           if (event.type !== 'response.audio.delta' && event.type !== 'input_audio_buffer.speech_started') {
             console.log('📥 OpenAI Event:', event.type);
-            
-            // ✅ LOG FULL DETAILS for critical events
-            if (event.type === 'session.created' || event.type === 'session.updated') {
-              console.log('   Session Details:', JSON.stringify(event.session, null, 2));
-            }
-            
-            if (event.type === 'response.created' || event.type === 'response.done') {
-              console.log('   Response Details:', JSON.stringify(event.response, null, 2));
-            }
           }
           
           if (event.type === 'session.updated') {
@@ -864,7 +871,6 @@ wss.on('connection', async (ws, req) => {
             console.log('🤖 Krystle:', event.transcript);
           }
           
-          // ✅ LOG ERRORS
           if (event.type === 'error') {
             console.error('❌ OpenAI Error Event:', JSON.stringify(event, null, 2));
           }
@@ -917,15 +923,16 @@ wss.on('connection', async (ws, req) => {
 
 server.listen(PORT, () => {
   console.log('');
-  console.log('🚀 Talkertive WebSocket Bridge Server v2.1');
+  console.log('🚀 Talkertive WebSocket Bridge Server v2.2');
   console.log('📡 Port:', PORT);
   console.log('🎤 Receptionist: Krystle (Shimmer voice)');
   console.log('🔧 Features:');
-  console.log('   ✅ Real-time lead capture');
-  console.log('   ✅ Appointment booking');
+  console.log('   ✅ Real-time lead capture with SMS consent');
+  console.log('   ✅ Appointment booking with SMS consent');
   console.log('   ✅ Order status lookup');
   console.log('   ✅ SMS notifications');
-  console.log('   ✅ n8n webhook integration');
+  console.log('   ✅ n8n webhook integration (double-nested body structure)');
+  console.log('   ✅ Webhook deduplication');
   console.log('');
   console.log('📱 SMS Status:', process.env.TWILIO_PHONE_NUMBER ? 'Enabled' : 'Disabled (set TWILIO_PHONE_NUMBER)');
   console.log('🔔 n8n Webhook:', process.env.N8N_WEBHOOK_URL ? 'Enabled' : 'Disabled (set N8N_WEBHOOK_URL)');
