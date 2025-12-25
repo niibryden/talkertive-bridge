@@ -828,6 +828,11 @@ wss.on('connection', async (ws, req) => {
         try {
           const event = JSON.parse(data.toString());
           
+          // ✅ LOG ALL EVENTS for debugging
+          if (event.type !== 'response.audio.delta' && event.type !== 'input_audio_buffer.speech_started') {
+            console.log('📥 OpenAI Event:', event.type);
+          }
+          
           if (event.type === 'session.updated') {
             console.log('✅ Session configured - triggering greeting');
             openaiWs.send(JSON.stringify({ type: 'response.create' }));
@@ -848,6 +853,15 @@ wss.on('connection', async (ws, req) => {
           
           if (event.type === 'response.audio_transcript.done') {
             console.log('🤖 Krystle:', event.transcript);
+          }
+          
+          // ✅ LOG ERRORS
+          if (event.type === 'error') {
+            console.error('❌ OpenAI Error Event:', JSON.stringify(event, null, 2));
+          }
+          
+          if (event.type === 'response.failed') {
+            console.error('❌ Response Failed:', JSON.stringify(event, null, 2));
           }
           
           // Handle function calls
