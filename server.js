@@ -828,9 +828,18 @@ wss.on('connection', async (ws, req) => {
         try {
           const event = JSON.parse(data.toString());
           
-          // ✅ LOG ALL EVENTS for debugging
+          // ✅ LOG ALL EVENTS for debugging (except audio deltas to avoid spam)
           if (event.type !== 'response.audio.delta' && event.type !== 'input_audio_buffer.speech_started') {
             console.log('📥 OpenAI Event:', event.type);
+            
+            // ✅ LOG FULL DETAILS for critical events
+            if (event.type === 'session.created' || event.type === 'session.updated') {
+              console.log('   Session Details:', JSON.stringify(event.session, null, 2));
+            }
+            
+            if (event.type === 'response.created' || event.type === 'response.done') {
+              console.log('   Response Details:', JSON.stringify(event.response, null, 2));
+            }
           }
           
           if (event.type === 'session.updated') {
