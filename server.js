@@ -807,11 +807,11 @@ wss.on('connection', async (ws) => {
           const event = JSON.parse(data.toString());
 
           if (event.type === 'session.updated') {
-            // Wait 2 seconds before triggering the first response
+            // Wait 1 second before triggering the first response (sounds more natural)
             setTimeout(() => {
-              console.log('✅ Starting conversation after 2-second delay');
+              console.log('✅ Starting conversation after 1-second delay');
               openaiWs.send(JSON.stringify({ type: 'response.create' }));
-            }, 2000);
+            }, 1000);
           }
 
           if (event.type === 'response.audio.delta' && event.delta) {
