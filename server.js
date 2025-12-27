@@ -385,6 +385,9 @@ wss.on('connection', async (ws) => {
   let appointmentDetails = null; // function args
   let appointmentResult = null; // backend response
 
+  // Conversation transcript
+  const conversationTranscript = [];
+
   ws.on('message', async (message) => {
     try {
       const msg = JSON.parse(message.toString());
@@ -473,6 +476,11 @@ wss.on('connection', async (ws) => {
             calendarEventCreated: appointmentResult?.calendarEventCreated,
           });
 
+          // Format conversation log
+          const conversationLog = conversationTranscript.length > 0 
+            ? conversationTranscript.map(entry => `[${entry.speaker}]: ${entry.text}`).join('\n')
+            : 'Conversation transcript not available';
+
           if (appointmentIntent && hasIsoDateTime && hasAppointmentId) {
             await triggerN8nWebhook('appointment_booked', {
               ...base,
@@ -490,6 +498,7 @@ wss.on('connection', async (ws) => {
               meetLink: appointmentResult.meetLink || undefined,
               smsConsent: !!appointmentDetails.smsConsent,
               leadCaptured: hasLeadInfo,
+              conversationLog,
             });
           } else if (hasLeadInfo) {
             await triggerN8nWebhook('lead_captured', {
@@ -502,6 +511,7 @@ wss.on('connection', async (ws) => {
               appointmentBooked: false,
               leadCaptured: true,
               bookingIntent: appointmentIntent,
+              conversationLog,
             });
           } else {
             await triggerN8nWebhook('call_completed', {
@@ -509,6 +519,7 @@ wss.on('connection', async (ws) => {
               appointmentBooked: false,
               leadCaptured: false,
               bookingIntent: appointmentIntent,
+              conversationLog,
             });
           }
 
@@ -766,10 +777,20 @@ wss.on('connection', async (ws) => {
 
           if (event.type === 'conversation.item.input_audio_transcription.completed') {
             console.log('👤 User:', event.transcript);
+            conversationTranscript.push({
+              speaker: 'Customer',
+              text: event.transcript,
+              timestamp: new Date().toISOString()
+            });
           }
 
           if (event.type === 'response.audio_transcript.done') {
             console.log('🤖 Krystle:', event.transcript);
+            conversationTranscript.push({
+              speaker: 'Krystle',
+              text: event.transcript,
+              timestamp: new Date().toISOString()
+            });
           }
 
           if (event.type === 'error' || event.type === 'response.failed') {
