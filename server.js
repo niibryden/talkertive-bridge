@@ -369,9 +369,11 @@ app.post('/incoming-call', async (req, res) => {
   console.log('   From:', from);
   console.log('   To:', to);
 
+  // TwiML: Brief pause to simulate ring before AI answers (feels more natural)
   const twiml =
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<Response>\n' +
+    '  <Pause length="2"/>\n' +
     '  <Connect>\n' +
     `    <Stream url="wss://${req.headers.host}/media-stream">\n` +
     `      <Parameter name="callSid" value="${callSid}" />\n` +
