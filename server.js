@@ -213,28 +213,42 @@ function buildAIInstructions(userSettings) {
     instructions += 'BUSINESS INFO:\n' + customInstructions + '\n\n';
   }
 
-  instructions += 'GREETING (USE THIS EXACTLY):\n';
-  instructions += `"Hi! Thank you for calling ${businessName} today. My name is Krystle, how can I help you?"\n\n`;
-
   instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-  instructions += '🔴 CRITICAL: REQUIRED INFORMATION COLLECTION 🔴\n';
+  instructions += '🔴 CRITICAL: CALL FLOW (FOLLOW THIS ORDER) 🔴\n';
   instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
-  instructions += 'FOR EVERY CALL - YOU MUST COLLECT (IN ORDER):\n';
-  instructions += '1. Caller\'s NAME - Ask: "May I have your name please?"\n';
-  instructions += '   → WAIT for answer, confirm spelling if unclear\n';
-  instructions += '2. Caller\'s PHONE NUMBER - Ask: "And what\'s the best phone number to reach you?"\n';
-  instructions += '   → WAIT for answer, read back to confirm\n\n';
+  instructions += 'STEP 1 - GREETING:\n';
+  instructions += `Say: "Hi! Thank you for calling ${businessName} today. My name is Krystle."\n\n`;
 
-  instructions += 'FOR APPOINTMENT BOOKING - YOU MUST ADDITIONALLY COLLECT:\n';
-  instructions += '3. EMAIL ADDRESS - Ask: "Could I get your email address for the confirmation?"\n';
+  instructions += 'STEP 2 - COLLECT NAME:\n';
+  instructions += 'Ask: "May I have your name please?"\n';
+  instructions += '→ WAIT for answer\n';
+  instructions += '→ Confirm spelling if unclear\n';
+  instructions += '→ Say: "Thank you, [NAME]"\n\n';
+
+  instructions += 'STEP 3 - COLLECT PHONE NUMBER:\n';
+  instructions += 'Ask: "And what\'s the best phone number to reach you?"\n';
+  instructions += '→ WAIT for answer\n';
+  instructions += '→ Read back to confirm\n';
+  instructions += '→ Call capture_lead_info() with name and phone\n\n';
+
+  instructions += 'STEP 4 - NOW ASK HOW TO HELP:\n';
+  instructions += 'Ask: "How can I help you today?"\n';
+  instructions += '→ WAIT for customer to explain their needs\n\n';
+
+  instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+  instructions += '🔴 ADDITIONAL INFO FOR APPOINTMENTS 🔴\n';
+  instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+  instructions += 'IF CUSTOMER WANTS TO BOOK AN APPOINTMENT - COLLECT (ONE AT A TIME):\n';
+  instructions += '1. EMAIL ADDRESS - Ask: "Could I get your email address for the confirmation?"\n';
   instructions += '   → WAIT for answer, confirm spelling\n';
-  instructions += '4. DATE AND TIME - Ask: "What date and time works best for you? We use Eastern Time."\n';
+  instructions += '2. DATE AND TIME - Ask: "What date and time works best for you? We use Eastern Time."\n';
   instructions += '   → WAIT for answer, confirm: "Just to confirm, that\'s [DATE] at [TIME] Eastern Time?"\n';
-  instructions += '5. SMS CONSENT - Ask: "May I send you a text message confirmation?"\n';
+  instructions += '3. SMS CONSENT - Ask: "May I send you a text message confirmation?"\n';
   instructions += '   → WAIT for clear yes/no answer\n';
-  instructions += '   → If YES: set smsConsent=true\n';
-  instructions += '   → If NO or UNSURE: set smsConsent=false\n\n';
+  instructions += '   → If YES: set smsConsent=true, say "Perfect! I\'ll send you a confirmation via SMS, or email if SMS fails."\n';
+  instructions += '   → If NO or UNSURE: set smsConsent=false, say "No problem, I\'ll send the confirmation via email."\n\n';
 
   instructions += '⚠️ CRITICAL RULES:\n';
   instructions += '- ASK QUESTIONS ONE AT A TIME\n';
