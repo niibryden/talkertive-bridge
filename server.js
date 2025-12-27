@@ -797,6 +797,9 @@ wss.on('connection', async (ws) => {
             },
           }),
         );
+        
+        // Wait 2 seconds before letting AI start speaking
+        console.log('⏳ Waiting 2 seconds before initiating conversation...');
       });
 
       openaiWs.on('message', async (data) => {
@@ -804,7 +807,11 @@ wss.on('connection', async (ws) => {
           const event = JSON.parse(data.toString());
 
           if (event.type === 'session.updated') {
-            openaiWs.send(JSON.stringify({ type: 'response.create' }));
+            // Wait 2 seconds before triggering the first response
+            setTimeout(() => {
+              console.log('✅ Starting conversation after 2-second delay');
+              openaiWs.send(JSON.stringify({ type: 'response.create' }));
+            }, 2000);
           }
 
           if (event.type === 'response.audio.delta' && event.delta) {
