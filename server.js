@@ -269,9 +269,28 @@ function buildAIInstructions(userSettings) {
   instructions += '- timeZone should be "America/New_York" unless customer specifies otherwise\n\n';
 
   instructions += 'LEAD CAPTURE:\n';
-  instructions += '- Call capture_lead_info() as you collect information during the call\n';
-  instructions += '- Update it when you learn more details\n';
-  instructions += '- Always ask for SMS consent before setting smsConsent=true\n\n';
+  instructions += '🔴 CRITICAL: Call capture_lead_info() in these scenarios:\n';
+  instructions += '✅ Customer provides name + phone AND shows ANY product/service interest\n';
+  instructions += '✅ Customer asks questions about products, services, pricing, availability, features\n';
+  instructions += '✅ Customer is gathering information (even without requesting follow-up)\n';
+  instructions += '✅ Call ends without booking appointment but customer engaged meaningfully\n\n';
+  
+  instructions += '❌ DO NOT capture as lead when:\n';
+  instructions += '- Wrong number / misdial\n';
+  instructions += '- Spam call\n';
+  instructions += '- Customer only asks ultra-basic info (hours, address) with zero engagement\n\n';
+  
+  instructions += 'WHEN TO CALL capture_lead_info():\n';
+  instructions += '1. IMMEDIATELY after collecting name + phone (Step 3)\n';
+  instructions += '2. UPDATE it when customer asks product questions or shows interest\n';
+  instructions += '3. UPDATE it again before call ends with final notes\n\n';
+  
+  instructions += 'EXAMPLE - Product Inquiry Call:\n';
+  instructions += 'Customer: "What sizes do you have available?"\n';
+  instructions += '→ This is a QUALIFIED LEAD! Call capture_lead_info() with:\n';
+  instructions += '  notes: "Asked about product sizes - interested in purchasing"\n\n';
+  
+  instructions += '⚠️ REMEMBER: Always ask for SMS consent before setting smsConsent=true\n\n';
 
   instructions += 'CONVERSATION FLOW:\n';
   instructions += '- Be warm, natural, and professional\n';
@@ -289,7 +308,7 @@ const FUNCTION_TOOLS = [
     type: 'function',
     name: 'capture_lead_info',
     description:
-      'Capture customer information during the conversation. Ask for SMS consent before setting smsConsent=true.',
+      'Capture customer lead information. Call this IMMEDIATELY after collecting name+phone, then UPDATE it when customer shows product/service interest (asks about pricing, features, availability, etc). Always ask for SMS consent before setting smsConsent=true.',
     parameters: {
       type: 'object',
       properties: {
