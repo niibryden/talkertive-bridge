@@ -230,11 +230,14 @@ function buildAIInstructions(userSettings) {
   instructions += 'Ask: "And what\'s the best phone number to reach you?"\n';
   instructions += '→ WAIT for answer\n';
   instructions += '→ Read back to confirm\n';
-  instructions += '→ Call capture_lead_info() with name and phone\n\n';
+  instructions += '→ 🔴 IMMEDIATELY call capture_lead_info() with name and phone - NO EXCEPTIONS\n';
+  instructions += '→ You MUST call this function right now, do not wait or skip this step\n\n';
 
   instructions += 'STEP 4 - NOW ASK HOW TO HELP:\n';
   instructions += 'Ask: "How can I help you today?"\n';
-  instructions += '→ WAIT for customer to explain their needs\n\n';
+  instructions += '→ WAIT for customer to explain their needs\n';
+  instructions += '→ When customer asks ANY product/service question, IMMEDIATELY UPDATE capture_lead_info() with notes\n';
+  instructions += '→ Example: Customer asks "What sizes?" → Call capture_lead_info({notes: "Asked about product sizes"})\n\n';
 
   instructions += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
   instructions += '🔴 ADDITIONAL INFO FOR APPOINTMENTS 🔴\n';
